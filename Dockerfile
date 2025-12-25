@@ -1,19 +1,18 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
+WORKDIR /app
 
-# 1. すべてのファイルをコピー
-COPY . .
+# 同じフォルダにあるプロジェクトファイルをコピー
+COPY *.csproj ./
+RUN dotnet restore
 
-# 2. .csproj ファイルを自動で見つけて、そのディレクトリに移動してビルド
-# 階層が Discode-main/ なのか Discode-main/Discode-main/ なのかを自動判別させます
-RUN dotnet restore $(find . -name "*.csproj")
-RUN dotnet publish $(find . -name "*.csproj") -c Release -o /app/publish /p:UseAppHost=false
+# すべてのソースをコピーしてビルド
+COPY . ./
+RUN dotnet publish -c Release -o out
 
-# --- 実行用イメージ ---
+# 実行用イメージ
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
-COPY --from=build /app/publish .
+COPY --from=build /app/out .
 
-# 実行するDLL名を確認してください。
-# プロジェクト名が Discode-main.csproj なら Discode-main.dll になります。
+# プロジェクト名が Discode-main.csproj なら Discode-main.dll
 ENTRYPOINT ["dotnet", "Discode-main.dll"]
