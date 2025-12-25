@@ -1,6 +1,7 @@
 using Discord;
 using Discord.WebSocket;
 using DiscordTimeSignal.Data;
+using Discord.Data;
 
 namespace DiscordTimeSignal.Workers;
 
