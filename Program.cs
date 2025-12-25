@@ -1,10 +1,9 @@
 using Discord;
-using Discord.Interactions;
 using Discord.WebSocket;
-using Discord.Data;
-using DiscordTimeSignal.Handlers;
-using DiscordTimeSignal.Modules;
-using DiscordTimeSignal.Workers;
+using Discord.Interactions;
+using Discord.Data;        // データベース関連
+using Discord.Modules;     // 各コマンドモジュール
+using Discord.Workers;     // 定期実行ワーカー
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
