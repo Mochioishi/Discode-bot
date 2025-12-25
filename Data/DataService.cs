@@ -1,7 +1,6 @@
 using Dapper;
 using Npgsql;
 using Microsoft.Extensions.Configuration;
-using Discord.Data;
 
 namespace Discord.Data
 {
@@ -11,40 +10,33 @@ namespace Discord.Data
 
         public DataService(IConfiguration configuration)
         {
-            // Railwayの環境変数などから接続文字列を取得
             _connectionString = configuration.GetConnectionString("DefaultConnection") 
                                ?? Environment.GetEnvironmentVariable("DATABASE_URL") 
                                ?? "";
         }
 
-        // --- 以下、エラーを解消するためのメソッド群 ---
+        private NpgsqlConnection GetConn() => new NpgsqlConnection(_connectionString);
 
-        // CleanerModule用
-        public async Task<object?> GetCleanupSettingsAsync(ulong guildId)
-        {
-            using var conn = new NpgsqlConnection(_connectionString);
-            return await conn.QueryFirstOrDefaultAsync("SELECT * FROM CleanupSettings WHERE GuildId = @guildId", new { guildId });
-        }
+        // --- Cleanup ---
+        public async Task<IEnumerable<CleanupSetting>> GetAllCleanupSettingsAsync() => await GetConn().QueryAsync<CleanupSetting>("SELECT * FROM CleanupSettings");
+        public async Task<CleanupSetting?> GetCleanupSettingsAsync(ulong guildId) => await GetConn().QueryFirstOrDefaultAsync<CleanupSetting>("SELECT * FROM CleanupSettings WHERE GuildId = @guildId", new { guildId });
+        public async Task SaveCleanupSettingAsync(CleanupSetting s) => await GetConn().ExecuteAsync("INSERT INTO CleanupSettings (GuildId, ChannelId) VALUES (@GuildId, @ChannelId) ON CONFLICT (GuildId) DO UPDATE SET ChannelId = @ChannelId", s);
+        public async Task DeleteCleanupSettingAsync(ulong guildId) => await GetConn().ExecuteAsync("DELETE FROM CleanupSettings WHERE GuildId = @guildId", new { guildId });
 
-        // GameAssistModule用
-        public async Task<IEnumerable<object>> GetGameRoomConfigsAsync(ulong guildId)
-        {
-            using var conn = new NpgsqlConnection(_connectionString);
-            return await conn.QueryAsync("SELECT * FROM GameRoomConfigs WHERE GuildId = @guildId", new { guildId });
-        }
+        // --- GameRoom ---
+        public async Task<IEnumerable<GameRoomConfig>> GetGameRoomConfigsAsync(ulong guildId) => await GetConn().QueryAsync<GameRoomConfig>("SELECT * FROM GameRoomConfigs WHERE GuildId = @guildId", new { guildId });
+        public async Task<GameRoomConfig?> GetConfigByMonitorChannelAsync(ulong channelId) => await GetConn().QueryFirstOrDefaultAsync<GameRoomConfig>("SELECT * FROM GameRoomConfigs WHERE MonitorChannelId = @channelId", new { channelId });
+        public async Task SaveGameRoomConfigAsync(GameRoomConfig c) => await GetConn().ExecuteAsync("INSERT INTO GameRoomConfigs (GuildId, MonitorChannelId, TargetChannelId, OriginalNameFormat) VALUES (@GuildId, @MonitorChannelId, @TargetChannelId, @OriginalNameFormat)", c);
 
-        // RoleModule用
-        public async Task<IEnumerable<object>> GetRoleGiveConfigsAsync(ulong guildId)
-        {
-            using var conn = new NpgsqlConnection(_connectionString);
-            return await conn.QueryAsync("SELECT * FROM RoleGiveConfigs WHERE GuildId = @guildId", new { guildId });
-        }
+        // --- Role ---
+        public async Task<IEnumerable<RoleGiveConfig>> GetRoleGiveConfigsAsync(ulong messageId) => await GetConn().QueryAsync<RoleGiveConfig>("SELECT * FROM RoleGiveConfigs WHERE MessageId = @messageId", new { messageId });
+        public async Task<RoleGiveConfig?> GetRoleGiveConfigAsync(ulong messageId, string emoji) => await GetConn().QueryFirstOrDefaultAsync<RoleGiveConfig>("SELECT * FROM RoleGiveConfigs WHERE MessageId = @messageId AND EmojiName = @emoji", new { messageId, emoji });
+        public async Task SaveRoleGiveConfigAsync(RoleGiveConfig r) => await GetConn().ExecuteAsync("INSERT INTO RoleGiveConfigs (MessageId, RoleId, EmojiName) VALUES (@MessageId, @RoleId, @EmojiName)", r);
 
-        // MessengerModule用
-        public async Task<IEnumerable<object>> GetMessageTasksByChannelAsync(ulong channelId)
-        {
-            using var conn = new NpgsqlConnection(_connectionString);
-            return await conn.QueryAsync("SELECT * FROM MessageTasks WHERE ChannelId = @channelId", new { channelId });
-        }
+        // --- Messenger ---
+        public async Task<IEnumerable<MessageTask>> GetMessageTasksByChannelAsync(ulong channelId) => await GetConn().QueryAsync<MessageTask>("SELECT * FROM MessageTasks WHERE ChannelId = @channelId", new { channelId });
+        public async Task<IEnumerable<MessageTask>> GetTasksByTimeAsync(DateTime time) => await GetConn().QueryAsync<MessageTask>("SELECT * FROM MessageTasks WHERE ScheduledTime <= @time", new { time });
+        public async Task SaveMessageTaskAsync(MessageTask t) => await GetConn().ExecuteAsync("INSERT INTO MessageTasks (ChannelId, Content, ScheduledTime) VALUES (@ChannelId, @Content, @ScheduledTime)", t);
+        public async Task DeleteMessageTaskAsync(int id) => await GetConn().ExecuteAsync("DELETE FROM MessageTasks WHERE Id = @id", new { id });
     }
 }
