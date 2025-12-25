@@ -1,18 +1,20 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /app
 
-# プロジェクトファイルをコピーして復元
-COPY *.csproj ./
-RUN dotnet restore
-
-# 全ファイルをコピーしてビルド
+# 1. すべてのファイルを一度作業ディレクトリにコピー
 COPY . ./
-RUN dotnet publish -c Release -o out
 
-# 実行用イメージ
+# 2. プロジェクトファイルがある場所に移動してリストア
+# もしフォルダ名が違う場合は、ここを実際のフォルダ名に変更してください
+RUN dotnet restore Discode-main/*.csproj
+
+# 3. ビルドと発行
+RUN dotnet publish Discode-main/*.csproj -c Release -o out
+
+# --- 実行用イメージ ---
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
 COPY --from=build /app/out .
 
-# プロジェクト名に合わせて変更してください（例: DiscordBot.dll）
-ENTRYPOINT ["dotnet", "DiscordTimeSignal.dll"]
+# プロジェクト名が「Discode.csproj」なら「Discode.dll」になります
+ENTRYPOINT ["dotnet", "Discode.dll"]
