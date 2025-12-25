@@ -1,11 +1,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /app
 
-# プロジェクトファイル名は Discord.csproj
+# プロジェクトファイルをコピー
+# あなたのcsproj名は「Discord.csproj」です
 COPY Discord.csproj ./
 RUN dotnet restore
 
-# すべてのソースをコピーしてビルド
+# すべてのソースコードをコピー
 COPY . ./
 RUN dotnet publish -c Release -o out
 
@@ -14,5 +15,5 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
 COPY --from=build /app/out .
 
-# 実行ファイル名は Discord.dll
+# 実行
 ENTRYPOINT ["dotnet", "Discord.dll"]
