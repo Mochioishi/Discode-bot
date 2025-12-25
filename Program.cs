@@ -4,69 +4,52 @@ using Discord.Interactions;
 using Discord.Data;
 using Discord.Modules;
 using Discord.Workers;
-using Discord.Handlers; // ← これが必要！
+using Discord.Handlers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
+using Npgsql; // 追加
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateDefaultBuilder(args);
 
-// --- 1. 依存関係の登録 (DI) ---
-builder.Services.AddSingleton<DiscordSocketClient>(new DiscordSocketClient(new DiscordSocketConfig
+builder.ConfigureServices((hostContext, services) =>
 {
-    GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent | GatewayIntents.GuildMembers,
-    AlwaysDownloadUsers = true
-}));
-builder.Services.AddSingleton<InteractionService>();
-builder.Services.AddSingleton<DataService>();
-builder.Services.AddSingleton<InteractionHandler>();
-
-// バックグラウンドサービス (1分ごとの監視)
-builder.Services.AddHostedService<TimeSignalWorker>();
+    services.AddSingleton<DiscordSocketClient>();
+    services.AddSingleton<InteractionService>();
+    services.AddSingleton<DataService>();
+    services.AddSingleton<InteractionHandler>();
+    services.AddHostedService<TimeSignalWorker>();
+});
 
 var host = builder.Build();
 
-// --- 2. 各サービスの取得 ---
-var client = host.Services.GetRequiredService<DiscordSocketClient>();
-var handler = host.Services.GetRequiredService<InteractionHandler>();
+// --- ここから自動テーブル作成ロジック ---
 var dataService = host.Services.GetRequiredService<DataService>();
 var config = host.Services.GetRequiredService<IConfiguration>();
+var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL");
 
-// --- 3. イベントの紐付け ---
-
-// スラッシュコマンドとボタン等の初期化
-await handler.InitializeAsync();
-
-// [prsk_roomid] 5-6桁の数字監視
-client.MessageReceived += async (msg) => 
+// DataServiceと同じ変換ロジックで接続文字列を作成
+if (!string.IsNullOrEmpty(connectionString) && connectionString.Contains("://"))
 {
-    if (msg.Author.IsBot) return;
-    var gameModule = new GameAssistModule(dataService, client);
-};
+    var uri = new Uri(connectionString);
+    var userInfo = uri.UserInfo.Split(':');
+    connectionString = $"Host={uri.Host};Port={uri.Port};Username={userInfo[0]};Password={userInfo[1]};Database={uri.AbsolutePath.Trim('/')};SSL Mode=Require;Trust Server Certificate=True";
+}
 
-// [rolegive] リアクション追加
-client.ReactionAdded += async (cache, ch, reaction) => 
+Console.WriteLine("Checking database tables...");
+using (var conn = new NpgsqlConnection(connectionString))
 {
-    if (reaction.User.Value.IsBot) return;
-    var cfg = await dataService.GetRoleGiveConfigAsync(reaction.MessageId, reaction.Emote.Name);
-    if (cfg != null && reaction.User.Value is IGuildUser user) await user.AddRoleAsync(cfg.RoleId);
-};
-
-// [rolegive] リアクション削除
-client.ReactionRemoved += async (cache, ch, reaction) => 
-{
-    if (reaction.User.Value.IsBot) return;
-    var cfg = await dataService.GetRoleGiveConfigAsync(reaction.MessageId, reaction.Emote.Name);
-    if (cfg != null && reaction.User.Value is IGuildUser user) await user.RemoveRoleAsync(cfg.RoleId);
-};
-
-// ログ出力
-client.Log += (log) => { Console.WriteLine(log); return Task.CompletedTask; };
-
-// --- 4. ログインと起動 ---
-// Railwayの環境変数 DISCORD_TOKEN を読み込む
-var token = config["DISCORD_TOKEN"]; 
-await client.LoginAsync(TokenType.Bot, token);
-await client.StartAsync();
+    await conn.OpenAsync();
+    var sql = @"
+        CREATE TABLE IF NOT EXISTS CleanupSettings (GuildId BIGINT PRIMARY KEY, ChannelId BIGINT NOT NULL, DaysBefore INT NOT NULL, ProtectionType TEXT);
+        CREATE TABLE IF NOT EXISTS GameRoomConfigs (MonitorChannelId BIGINT PRIMARY KEY, GuildId BIGINT NOT NULL, TargetChannelId BIGINT NOT NULL, OriginalNameFormat TEXT);
+        CREATE TABLE IF NOT EXISTS RoleGiveConfigs (MessageId BIGINT, EmojiName TEXT, RoleId BIGINT NOT NULL, PRIMARY KEY (MessageId, EmojiName));
+        CREATE TABLE IF NOT EXISTS MessageTasks (Id SERIAL PRIMARY KEY, ChannelId BIGINT NOT NULL, Content TEXT NOT NULL, ScheduledTime TIMESTAMP NOT NULL);
+    ";
+    using var cmd = new NpgsqlCommand(sql, conn);
+    await cmd.ExecuteNonQueryAsync();
+    Console.WriteLine("Database tables are ready!");
+}
+// --- ここまで ---
 
 await host.RunAsync();
