@@ -16,7 +16,7 @@ builder.ConfigureServices((hostContext, services) =>
 {
     services.AddSingleton<DiscordSocketClient>(new DiscordSocketClient(new DiscordSocketConfig
     {
-        // 全ての権限を要求（Developer PortalでのスイッチONが必要）
+        // ユーザー情報やメッセージ内容を取得するための権限設定
         GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.GuildMembers | GatewayIntents.MessageContent,
         AlwaysDownloadUsers = true
     }));
@@ -28,24 +28,23 @@ builder.ConfigureServices((hostContext, services) =>
 
 var host = builder.Build();
 
-// サービス取得
+// --- サービス・クライアントの取得 ---
 var client = host.Services.GetRequiredService<DiscordSocketClient>();
 var interactionService = host.Services.GetRequiredService<InteractionService>();
 var handler = host.Services.GetRequiredService<InteractionHandler>();
 
-// --- ログ出力強化セクション ---
+// --- ログ出力設定（ここが重要です） ---
 client.Log += (msg) => {
-    Console.WriteLine($"[Discord SDK Log] {msg.Severity}: {msg.Message} {msg.Exception}");
+    Console.WriteLine($"[Discord SDK] {msg.Severity}: {msg.Message} {msg.Exception}");
     return Task.CompletedTask;
 };
 
 interactionService.Log += (msg) => {
-    Console.WriteLine($"[Interaction Log] {msg.Severity}: {msg.Message}");
+    Console.WriteLine($"[Interaction SDK] {msg.Severity}: {msg.Message}");
     return Task.CompletedTask;
 };
-// --- ログ出力強化ここまで ---
 
-// データベース接続文字列の構築とテーブル作成
+// --- 1. データベースの初期設定 ---
 var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL");
 if (!string.IsNullOrEmpty(connectionString) && connectionString.Contains("://"))
 {
@@ -54,7 +53,7 @@ if (!string.IsNullOrEmpty(connectionString) && connectionString.Contains("://"))
         var userInfo = uri.UserInfo.Split(':');
         connectionString = $"Host={uri.Host};Port={uri.Port};Username={userInfo[0]};Password={userInfo[1]};Database={uri.AbsolutePath.Trim('/')};SSL Mode=Require;Trust Server Certificate=True";
     } catch (Exception ex) {
-        Console.WriteLine($"[DB Error] 接続文字列の解析に失敗: {ex.Message}");
+        Console.WriteLine($"[DB Setup] URL解析エラー: {ex.Message}");
     }
 }
 
@@ -74,41 +73,58 @@ try {
         Console.WriteLine("[DB] テーブル準備完了。");
     }
 } catch (Exception ex) {
-    Console.WriteLine($"[DB Critical Error] データベース接続に失敗しました: {ex.Message}");
+    Console.WriteLine($"[DB Error] データベース処理中にエラー: {ex.Message}");
 }
 
-// ハンドラー初期化
+// --- 2. ハンドラーの初期化 ---
 await handler.InitializeAsync();
 
-// 接続イベント
+// --- 3. Readyイベント（コマンドの同期） ---
 client.Ready += async () =>
 {
-    Console.WriteLine("[System] Discordに接続しました。Readyイベントを開始します...");
+    Console.WriteLine("[System] Discordに接続しました。コマンド同期を開始します...");
     
     try {
+        // コマンドモジュールの読み込み
         await interactionService.AddModulesAsync(System.Reflection.Assembly.GetEntryAssembly(), host.Services);
         
+        // ギルドIDを取得してコマンドを登録
         if (ulong.TryParse(Environment.GetEnvironmentVariable("SERVER_ID"), out var guildId))
         {
             var guild = client.GetGuild(guildId);
             if (guild != null)
             {
+                // 古いギルドコマンドを全削除
                 var oldCommands = await guild.GetApplicationCommandsAsync();
                 foreach (var cmd in oldCommands) await cmd.DeleteAsync();
 
+                // 新しいギルドコマンドを即時登録
                 var registered = await interactionService.RegisterCommandsToGuildAsync(guildId, true);
                 
-                Console.WriteLine($"[Command Sync] 完了: {oldCommands.Count}件削除 / {registered.Count()}件登録 (Guild: {guildId})");
+                Console.WriteLine($"[Command Sync] 成功: {oldCommands.Count}件削除 / {registered.Count()}件登録 (Guild: {guildId})");
             }
             else
             {
-                Console.WriteLine($"[Error] サーバー(ID:{guildId})が見つかりません。Botが参加しているか確認してください。");
+                Console.WriteLine($"[Error] 指定されたSERVER_ID({guildId})のサーバーが見つかりません。Botが参加しているか再確認してください。");
             }
         }
     } catch (Exception ex) {
-        Console.WriteLine($"[Ready Error] 初期化中にエラーが発生しました: {ex.Message}");
+        Console.WriteLine($"[Ready Error] コマンド同期中にエラー: {ex.Message}");
     }
 };
 
-Console.WriteLine("[System] Botを起動します...");
+// --- 4. ログインと実行 ---
+var token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
+if (!string.IsNullOrEmpty(token))
+{
+    Console.WriteLine("[System] Discordへログインします...");
+    await client.LoginAsync(TokenType.Bot, token);
+    await client.StartAsync();
+}
+else
+{
+    Console.WriteLine("[Critical Error] DISCORD_TOKEN が設定されていません。");
+}
+
+Console.WriteLine("[System] アプリケーションを実行中...");
 await host.RunAsync();
