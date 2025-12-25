@@ -1,11 +1,10 @@
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
-using DiscordTimeSignal.Data;
+using Discord.Data;
 using DiscordTimeSignal.Handlers;
 using DiscordTimeSignal.Modules;
 using DiscordTimeSignal.Workers;
-using Discord.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
