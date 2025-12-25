@@ -1,40 +1,42 @@
-using Discord.Interactions;
+using Discord;
 using Discord.WebSocket;
-using System.Reflection;
+using Discord.Interactions;
 using Discord.Data;
+using Discord.Modules;
+using Microsoft.Extensions.DependencyInjection;
 
-namespace Discord.Handlers;
+var builder = WebApplication.CreateBuilder(args);
 
-public class InteractionHandler
+// Discord client
+builder.Services.AddSingleton(new DiscordSocketClient(new DiscordSocketConfig
 {
-    private readonly DiscordSocketClient _client;
-    private readonly InteractionService _commands;
-    private readonly IServiceProvider _services;
+    GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent
+}));
 
-    public InteractionHandler(DiscordSocketClient client, InteractionService commands, IServiceProvider services)
-    {
-        _client = client;
-        _commands = commands;
-        _services = services;
-    }
+// DataService
+builder.Services.AddSingleton<DataService>();
 
-    public async Task InitializeAsync()
-    {
-        // 反射(Reflection)を使って全てのModuleを自動登録
-        await _commands.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
-        _client.InteractionCreated += HandleInteraction;
-    }
+// InteractionService と InteractionHandler
+builder.Services.AddSingleton<InteractionService>();
+builder.Services.AddSingleton<InteractionHandler>();
 
-    private async Task HandleInteraction(SocketInteraction interaction)
-    {
-        try
-        {
-            var context = new SocketInteractionContext(_client, interaction);
-            await _commands.ExecuteCommandAsync(context, _services);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(ex);
-        }
-    }
-}
+// モジュールは自動スキャンに任せるので個別登録は不要
+
+var app = builder.Build();
+
+var client = app.Services.GetRequiredService<DiscordSocketClient>();
+var handler = app.Services.GetRequiredService<InteractionHandler>();
+
+client.Log += msg =>
+{
+    Console.WriteLine(msg.ToString());
+    return Task.CompletedTask;
+};
+
+await handler.InitializeAsync();
+
+var token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
+await client.LoginAsync(TokenType.Bot, token);
+await client.StartAsync();
+
+await app.RunAsync();
