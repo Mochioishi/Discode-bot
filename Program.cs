@@ -11,10 +11,7 @@ using Microsoft.Extensions.Configuration;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// --- 1. 設定の読み込み ---
-var config = builder.Configuration;
-
-// --- 2. 依存関係の登録 (DI) ---
+// --- 1. 依存関係の登録 (DI) ---
 builder.Services.AddSingleton<DiscordSocketClient>(new DiscordSocketClient(new DiscordSocketConfig
 {
     GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent | GatewayIntents.GuildMembers,
@@ -24,28 +21,31 @@ builder.Services.AddSingleton<InteractionService>();
 builder.Services.AddSingleton<DataService>();
 builder.Services.AddSingleton<InteractionHandler>();
 
-// --- 3. バックグラウンドサービスの登録 ---
-builder.Services.AddHostedService<TimeSignalWorker>(); // bottextとdeleteagoの実行用
+// バックグラウンドサービス (1分ごとの監視)
+builder.Services.AddHostedService<TimeSignalWorker>();
 
 var host = builder.Build();
 
-// --- 4. イベントの紐付けロジック ---
+// --- 2. 各サービスの取得 ---
 var client = host.Services.GetRequiredService<DiscordSocketClient>();
 var handler = host.Services.GetRequiredService<InteractionHandler>();
 var dataService = host.Services.GetRequiredService<DataService>();
+var config = host.Services.GetRequiredService<IConfiguration>();
 
-// スラッシュコマンド等の初期化
+// --- 3. イベントの紐付け ---
+
+// スラッシュコマンドとボタン等の初期化
 await handler.InitializeAsync();
 
-// [prsk_roomid] メッセージ監視イベントの紐付け
+// [prsk_roomid] 5-6桁の数字監視
 client.MessageReceived += async (msg) => 
 {
-    using var scope = host.Services.CreateScope();
+    if (msg.Author.IsBot) return;
     var gameModule = new GameAssistModule(dataService, client);
     await gameModule.OnMessageReceived(msg);
 };
 
-// [rolegive] リアクション監視イベントの紐付け
+// [rolegive] リアクション追加
 client.ReactionAdded += async (cache, ch, reaction) => 
 {
     if (reaction.User.Value.IsBot) return;
@@ -53,6 +53,7 @@ client.ReactionAdded += async (cache, ch, reaction) =>
     if (cfg != null && reaction.User.Value is IGuildUser user) await user.AddRoleAsync(cfg.RoleId);
 };
 
+// [rolegive] リアクション削除
 client.ReactionRemoved += async (cache, ch, reaction) => 
 {
     if (reaction.User.Value.IsBot) return;
@@ -60,11 +61,13 @@ client.ReactionRemoved += async (cache, ch, reaction) =>
     if (cfg != null && reaction.User.Value is IGuildUser user) await user.RemoveRoleAsync(cfg.RoleId);
 };
 
-// 起動ログ
+// ログ出力
 client.Log += (log) => { Console.WriteLine(log); return Task.CompletedTask; };
 
-// --- 5. 実行 ---
-await client.LoginAsync(TokenType.Bot, config["DiscordToken"]);
+// --- 4. ログインと起動 ---
+// Railwayの環境変数 DISCORD_TOKEN を読み込む
+var token = config["DISCORD_TOKEN"]; 
+await client.LoginAsync(TokenType.Bot, token);
 await client.StartAsync();
 
 await host.RunAsync();
