@@ -5,6 +5,7 @@ using DiscordTimeSignal.Data;
 using DiscordTimeSignal.Handlers;
 using DiscordTimeSignal.Modules;
 using DiscordTimeSignal.Workers;
+using Discord.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
