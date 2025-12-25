@@ -1,10 +1,10 @@
-using System;
-
 namespace Discord.Data
 {
     public class CleanupSetting {
         public ulong GuildId { get; set; }
         public ulong ChannelId { get; set; }
+        public int DaysBefore { get; set; } // 追加
+        public string? ProtectionType { get; set; } // 追加
     }
 
     public class GameRoomConfig {
@@ -21,7 +21,7 @@ namespace Discord.Data
     }
 
     public class MessageTask {
-        public int Id { get; set; }
+        public int Id { get; set; } // MessengerModuleに合わせて int
         public ulong ChannelId { get; set; }
         public string? Content { get; set; }
         public DateTime ScheduledTime { get; set; }
