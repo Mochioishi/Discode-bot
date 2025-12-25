@@ -2,8 +2,7 @@ using Discord;
 using Discord.WebSocket;
 using Discord.Interactions;
 using Discord.Data;
-using Discord.Modules;
-using Microsoft.Extensions.DependencyInjection;
+using Discord.Handlers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,11 +15,9 @@ builder.Services.AddSingleton(new DiscordSocketClient(new DiscordSocketConfig
 // DataService
 builder.Services.AddSingleton<DataService>();
 
-// InteractionService と InteractionHandler
+// InteractionService + Handler
 builder.Services.AddSingleton<InteractionService>();
 builder.Services.AddSingleton<InteractionHandler>();
-
-// モジュールは自動スキャンに任せるので個別登録は不要
 
 var app = builder.Build();
 
