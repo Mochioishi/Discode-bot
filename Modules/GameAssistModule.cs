@@ -3,6 +3,7 @@ using Discord.Interactions;
 using Discord.WebSocket;
 using DiscordTimeSignal.Data;
 using System.Text.RegularExpressions;
+using Discord.Data;
 
 namespace DiscordTimeSignal.Modules;
 
