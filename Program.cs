@@ -42,7 +42,6 @@ client.MessageReceived += async (msg) =>
 {
     if (msg.Author.IsBot) return;
     var gameModule = new GameAssistModule(dataService, client);
-    await gameModule.OnMessageReceived(msg);
 };
 
 // [rolegive] リアクション追加
