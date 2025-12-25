@@ -3,7 +3,7 @@ using Discord.WebSocket;
 using System.Reflection;
 using Discord.Data;
 
-namespace DiscordTimeSignal.Handlers;
+namespace Discord.Handlers;
 
 public class InteractionHandler
 {
