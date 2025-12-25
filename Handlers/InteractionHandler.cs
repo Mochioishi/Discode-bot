@@ -22,11 +22,23 @@ public class InteractionHandler
 
     public async Task InitializeAsync()
     {
-        // モジュールを一度だけ登録
+        // モジュール登録
         await _commands.AddModulesAsync(Assembly.GetExecutingAssembly(), _services);
 
-        // Interaction を受け取る
+        // イベント登録
+        _client.Ready += OnReady;
         _client.InteractionCreated += HandleInteraction;
+    }
+
+    private async Task OnReady()
+    {
+        // ギルドコマンド（即時反映）
+        foreach (var guild in _client.Guilds)
+        {
+            await _commands.RegisterCommandsToGuildAsync(guild.Id);
+        }
+
+        Console.WriteLine("SlashCommand registered.");
     }
 
     private async Task HandleInteraction(SocketInteraction interaction)
