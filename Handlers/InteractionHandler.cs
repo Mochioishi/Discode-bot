@@ -1,42 +1,45 @@
-using Discord;
-using Discord.WebSocket;
 using Discord.Interactions;
+using Discord.WebSocket;
+using System.Reflection;
 using Discord.Data;
-using Discord.Modules;
-using Microsoft.Extensions.DependencyInjection;
 
-var builder = WebApplication.CreateBuilder(args);
+namespace DiscordTimeSignal.Handlers;
 
-// Discord client
-builder.Services.AddSingleton(new DiscordSocketClient(new DiscordSocketConfig
+public class InteractionHandler
 {
-    GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent
-}));
+    private readonly DiscordSocketClient _client;
+    private readonly InteractionService _commands;
+    private readonly IServiceProvider _services;
 
-// DataService
-builder.Services.AddSingleton<DataService>();
+    public InteractionHandler(
+        DiscordSocketClient client,
+        InteractionService commands,
+        IServiceProvider services)
+    {
+        _client = client;
+        _commands = commands;
+        _services = services;
+    }
 
-// InteractionService と InteractionHandler
-builder.Services.AddSingleton<InteractionService>();
-builder.Services.AddSingleton<InteractionHandler>();
+    public async Task InitializeAsync()
+    {
+        // モジュールを一度だけ登録
+        await _commands.AddModulesAsync(Assembly.GetExecutingAssembly(), _services);
 
-// モジュールは自動スキャンに任せるので個別登録は不要
+        // Interaction を受け取る
+        _client.InteractionCreated += HandleInteraction;
+    }
 
-var app = builder.Build();
-
-var client = app.Services.GetRequiredService<DiscordSocketClient>();
-var handler = app.Services.GetRequiredService<InteractionHandler>();
-
-client.Log += msg =>
-{
-    Console.WriteLine(msg.ToString());
-    return Task.CompletedTask;
-};
-
-await handler.InitializeAsync();
-
-var token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
-await client.LoginAsync(TokenType.Bot, token);
-await client.StartAsync();
-
-await app.RunAsync();
+    private async Task HandleInteraction(SocketInteraction interaction)
+    {
+        try
+        {
+            var context = new SocketInteractionContext(_client, interaction);
+            await _commands.ExecuteCommandAsync(context, _services);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+        }
+    }
+}
