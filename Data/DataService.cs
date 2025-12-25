@@ -1,6 +1,7 @@
 using Dapper;
 using Npgsql;
 using Microsoft.Extensions.Configuration;
+using Discord.Data;
 
 namespace Discord.Data
 {
