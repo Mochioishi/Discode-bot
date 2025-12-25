@@ -1,20 +1,24 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /app
+WORKDIR /src
 
-# 1. すべてのファイルを一度作業ディレクトリにコピー
-COPY . ./
+# 1. フォルダ構造を維持してコピー
+# Discode-mainフォルダ内のcsprojをコピーします
+COPY ["Discode-main/Discode-main.csproj", "Discode-main/"]
 
-# 2. プロジェクトファイルがある場所に移動してリストア
-# もしフォルダ名が違う場合は、ここを実際のフォルダ名に変更してください
-RUN dotnet restore Discode-main/*.csproj
+# 2. 依存関係の復元 (csprojの場所を明示)
+RUN dotnet restore "Discode-main/Discode-main.csproj"
 
-# 3. ビルドと発行
-RUN dotnet publish Discode-main/*.csproj -c Release -o out
+# 3. すべてのソースコードをコピー
+COPY . .
+
+# 4. ビルドと発行
+WORKDIR "/src/Discode-main"
+RUN dotnet publish "Discode-main.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
 # --- 実行用イメージ ---
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
-COPY --from=build /app/out .
+COPY --from=build /app/publish .
 
-# プロジェクト名が「Discode.csproj」なら「Discode.dll」になります
-ENTRYPOINT ["dotnet", "Discode.dll"]
+# 実行するDLL名をプロジェクト名に合わせる
+ENTRYPOINT ["dotnet", "Discode-main.dll"]
