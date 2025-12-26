@@ -30,6 +30,7 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
                 var embed = new EmbedBuilder()
                     .WithTitle(string.IsNullOrWhiteSpace(title) ? null : title)
                     .WithDescription(text)
+                    .WithColor(Color.Blue) 
                     .Build();
 
                 await Context.Channel.SendMessageAsync(embed: embed);
