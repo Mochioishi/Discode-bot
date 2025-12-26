@@ -30,7 +30,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     public async Task RoleGiveAsync(
         [Summary("role", "付与するロール")] IRole role)
     {
-        // 設定開始を ephemeral で通知
         await RespondAsync(
             $"ロール {role.Mention} を設定します。\n" +
             $"このチャンネル内の **既存のメッセージ** に、使いたい絵文字でリアクションしてください。\n" +
@@ -45,7 +44,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         };
     }
 
-    // /rolegive_list
+    // /rolegive_list（UI 連番対応）
     [SlashCommand("rolegive_list", "rolegiveで登録した内容を一覧にする")]
     public async Task RoleGiveListAsync()
     {
@@ -64,20 +63,24 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
         var components = new ComponentBuilder();
 
+        int index = 1;
+
         foreach (var e in list)
         {
             embed.AddField(
-                $"ID: {e.Id}",
+                $"No.{index}",
                 $"チャンネル: <#{e.ChannelId}>\n" +
                 $"ロール: <@&{e.RoleId}>\n" +
                 $"絵文字: `{e.Emoji}`",
                 inline: false);
 
             components.WithButton(
-                $"削除 {e.Id}",
+                $"削除 No.{index}",
                 $"delete_rolegive_{e.Id}",
                 ButtonStyle.Danger
             );
+
+            index++;
         }
 
         await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
