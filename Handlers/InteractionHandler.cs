@@ -1,8 +1,8 @@
+using System.Reflection;
 using Discord.Interactions;
 using Discord.WebSocket;
-using System.Reflection;
 
-namespace Discord.Handlers;
+namespace DiscordTimeSignal.Handlers;
 
 public class InteractionHandler
 {
@@ -22,17 +22,14 @@ public class InteractionHandler
 
     public async Task InitializeAsync()
     {
-        // モジュール登録
         await _commands.AddModulesAsync(Assembly.GetExecutingAssembly(), _services);
 
-        // イベント登録
         _client.Ready += OnReady;
         _client.InteractionCreated += HandleInteraction;
     }
 
     private async Task OnReady()
     {
-        // ギルドコマンド（即時反映）
         foreach (var guild in _client.Guilds)
         {
             await _commands.RegisterCommandsToGuildAsync(guild.Id);
@@ -45,8 +42,8 @@ public class InteractionHandler
     {
         try
         {
-            var context = new SocketInteractionContext(_client, interaction);
-            await _commands.ExecuteCommandAsync(context, _services);
+            var ctx = new SocketInteractionContext(_client, interaction);
+            await _commands.ExecuteCommandAsync(ctx, _services);
         }
         catch (Exception ex)
         {
