@@ -19,8 +19,8 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
     public async Task PrskRoomIdAsync(
         [Summary("watch", "ルームIDを監視するテキストチャンネル")] ITextChannel watch,
         [Summary("target", "名前を変更する対象チャンネル（テキストまたはボイス）")] IGuildChannel target,
-        [Summary("name_format", "チャンネル名フォーマット（{roomid} が置換される）")]
-        string nameFormat = "ex【{roomid}】")
+        [Summary("name_format", "オリジナルネーム（例: ex。未指定なら形式）")]
+        string nameFormat = "")
     {
         var entry = new PrskRoomIdEntry
         {
@@ -35,7 +35,7 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
         await RespondAsync(
             $"監視チャンネル: {watch.Mention}\n" +
             $"対象チャンネル: <#{target.Id}>\n" +
-            $"フォーマット: `{nameFormat}`\n" +
+            $"オリジナルネーム: `{(string.IsNullOrWhiteSpace(nameFormat) ? "(なし)" : nameFormat)}`\n" +
             $"として登録しました。",
             ephemeral: true);
     }
@@ -65,7 +65,7 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
                 $"ID: {e.Id}",
                 $"監視: <#{e.WatchChannelId}>\n" +
                 $"対象: <#{e.TargetChannelId}>\n" +
-                $"format: `{e.NameFormat}`",
+                $"オリジナルネーム: `{(string.IsNullOrWhiteSpace(e.NameFormat) ? "(なし)" : e.NameFormat)}`",
                 inline: false);
 
             components.WithButton(
@@ -109,13 +109,29 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
             var targetChannel = guild.GetChannel(match.TargetChannelId);
             if (targetChannel == null) return;
 
-            var newName = match.NameFormat.Replace("{roomid}", text);
+            var roomId = text;
 
-            if (targetChannel is ITextChannel textChannel)
-                await textChannel.ModifyAsync(p => p.Name = newName);
-            else if (targetChannel is IVoiceChannel voiceChannel)
-                await voiceChannel.ModifyAsync(p => p.Name = newName);
+            // ★ オリジナルネームの有無で分岐
+            string newName;
 
+            if (string.IsNullOrWhiteSpace(match.NameFormat))
+            {
+                // オリジナルネームなし → 
+                newName = $"【{roomId}】";
+            }
+            else
+            {
+                // オリジナルネーム ex → ex
+                newName = $"{match.NameFormat}【{roomId}】";
+            }
+
+            // ★ チャンネル名変更
+            if (targetChannel is ITextChannel textCh)
+                await textCh.ModifyAsync(p => p.Name = newName);
+            else if (targetChannel is IVoiceChannel voiceCh)
+                await voiceCh.ModifyAsync(p => p.Name = newName);
+
+            // ★ roomid メッセージにリアクション
             await message.AddReactionAsync(new Emoji("🐾"));
         }
         catch (Exception ex)
