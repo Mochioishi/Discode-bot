@@ -77,8 +77,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         try
         {
             if (reaction.UserId == _client.CurrentUser.Id) return;
-
-            // 🔥 ch.HasValue だけでは不十分 → ch.Value も null チェック
             if (!ch.HasValue || ch.Value == null) return;
 
             var channel = ch.Value as SocketTextChannel;
@@ -125,7 +123,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ReactionAdded ERROR] {ex.GetType().Name}: {ex.Message}");
+            Console.WriteLine($"[ReactionAdded ERROR] {ex}");
         }
     }
 
@@ -137,8 +135,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         try
         {
             if (reaction.UserId == _client.CurrentUser.Id) return;
-
-            // 🔥 ch.HasValue だけでは不十分 → ch.Value も null チェック
             if (!ch.HasValue || ch.Value == null) return;
 
             var channel = ch.Value as SocketTextChannel;
@@ -158,7 +154,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ReactionRemoved ERROR] {ex.GetType().Name}: {ex.Message}");
+            Console.WriteLine($"[ReactionRemoved ERROR] {ex}");
         }
     }
 }
