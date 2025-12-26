@@ -69,11 +69,10 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
             ephemeral: true);
     }
 
-    // /bottext_list
+    // /bottext_list（UI 連番対応）
     [SlashCommand("bottext_list", "bottextで登録した内容を一覧にする")]
     public async Task BotTextListAsync()
     {
-        // ★ ギルド全体の予約を取得
         var entries = await _data.GetBotTextsByGuildAsync(Context.Guild.Id);
         var list = entries.ToList();
 
@@ -84,15 +83,17 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         var embed = new EmbedBuilder()
-            .WithTitle("📝 bottext 予約一覧（")
+            .WithTitle("📝 bottext 予約一覧")
             .WithColor(Color.Blue);
 
         var components = new ComponentBuilder();
 
+        int index = 1;
+
         foreach (var e in list)
         {
             embed.AddField(
-                $"ID: {e.Id}",
+                $"No.{index}",
                 $"チャンネル: <#{e.ChannelId}>\n" +
                 $"時間: `{e.TimeHhmm}`\n" +
                 $"埋め込み: `{e.IsEmbed}`\n" +
@@ -100,17 +101,20 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
                 inline: false
             );
 
+            // 削除ボタンは DB の ID を使う（内部識別子）
             components.WithButton(
-                $"削除 {e.Id}",
+                $"削除 No.{index}",
                 $"delete_bottext_{e.Id}",
                 ButtonStyle.Danger
             );
+
+            index++;
         }
 
         await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
     }
 
-    // ★ 削除ボタン
+    // 削除ボタン
     [ComponentInteraction("delete_bottext_*")]
     public async Task DeleteBotTextAsync(string id)
     {
