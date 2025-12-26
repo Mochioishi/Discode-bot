@@ -42,7 +42,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         };
 
         await RespondAsync(
-            $"ロール `{role.Name}` を設定します。\n" +
+            $"ロール {role.Mention} を設定します。\n" +
             $"対象にしたいメッセージに、使いたい絵文字でリアクションしてください。",
             ephemeral: true);
     }
