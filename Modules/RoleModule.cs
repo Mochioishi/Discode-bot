@@ -86,13 +86,78 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
     }
 
-    // 削除ボタン Interaction
+    // 削除ボタン Interaction（ロール剥奪＋Botリアクション削除＋DB削除）
     [ComponentInteraction("delete_rolegive_*")]
     public async Task DeleteRoleGiveAsync(string id)
     {
         long entryId = long.Parse(id);
+
+        // 設定取得
+        var entry = await _data.GetRoleGiveByIdAsync(entryId);
+        if (entry == null)
+        {
+            await RespondAsync("設定が見つかりませんでした。", ephemeral: true);
+            return;
+        }
+
+        var guild = Context.Guild;
+        var channel = guild.GetTextChannel(entry.ChannelId);
+        if (channel == null)
+        {
+            await RespondAsync("チャンネルが見つかりませんでした。", ephemeral: true);
+            return;
+        }
+
+        var message = await channel.GetMessageAsync(entry.MessageId) as IUserMessage;
+        if (message == null)
+        {
+            await RespondAsync("対象メッセージが見つかりませんでした。", ephemeral: true);
+            return;
+        }
+
+        // 絵文字復元
+        var emote = Emote.TryParse(entry.Emoji, out var custom)
+            ? (IEmote)custom
+            : new Emoji(entry.Emoji);
+
+        // リアクションしているユーザー取得
+        var users = await message.GetReactionUsersAsync(emote, 100).FlattenAsync();
+
+        var role = guild.GetRole(entry.RoleId);
+        int removedCount = 0;
+
+        // ロール剥奪
+        if (role != null)
+        {
+            foreach (var u in users)
+            {
+                if (u.IsBot) continue;
+
+                var gUser = guild.GetUser(u.Id);
+                if (gUser != null && gUser.Roles.Any(r => r.Id == role.Id))
+                {
+                    await gUser.RemoveRoleAsync(role);
+                    removedCount++;
+                }
+            }
+        }
+
+        // Bot のリアクション削除
+        try
+        {
+            await message.RemoveReactionAsync(emote, _client.CurrentUser);
+        }
+        catch { }
+
+        // DB 削除
         await _data.DeleteRoleGiveAsync(entryId);
-        await RespondAsync($"ID {entryId} を削除しました。", ephemeral: true);
+
+        await RespondAsync(
+            $"設定を削除しました。\n" +
+            $"ロール解除対象: **{removedCount}人**\n" +
+            $"Bot のリアクションも削除しました。",
+            ephemeral: true
+        );
     }
 
     // ReactionAdded
@@ -111,7 +176,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             var channel = message.Channel as SocketTextChannel;
             if (channel == null) return;
 
-            // ① /rolegive 実行直後の登録処理
+            // ① 設定直後の登録処理
             if (Pending.TryGetValue(reaction.UserId, out var pending))
             {
                 if (pending.GuildId == channel.Guild.Id &&
@@ -123,16 +188,16 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
                         ChannelId = pending.ChannelId,
                         MessageId = reaction.MessageId,
                         RoleId = pending.RoleId,
-                        Emoji = reaction.Emote.ToString()   // ← 修正
+                        Emoji = reaction.Emote.ToString()
                     };
 
                     await _data.AddRoleGiveAsync(entry);
 
-                    // Bot も同じリアクションを付ける
+                    // Bot もリアクションを付ける
                     await message.AddReactionAsync(reaction.Emote);
 
-                    // 設定完了を ephemeral で通知
-                    await FollowupAsync(
+                    // Interaction ではないので FollowupAsync は使えない
+                    await channel.SendMessageAsync(
                         embed: new EmbedBuilder()
                             .WithTitle("🎉 rolegive の設定が完了しました！")
                             .WithDescription(
@@ -140,8 +205,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
                                 $"絵文字: {reaction.Emote}\n\n" +
                                 $"この絵文字を付けるとロールが付与され、外すとはく奪されます。")
                             .WithColor(Color.Blue)
-                            .Build(),
-                        ephemeral: true
+                            .Build()
                     );
 
                     Pending.Remove(reaction.UserId);
@@ -153,7 +217,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
             if (rg == null) return;
 
-            if (reaction.Emote.ToString() != rg.Emoji) return;   // ← 修正
+            if (reaction.Emote.ToString() != rg.Emoji) return;
 
             var user = channel.Guild.GetUser(reaction.UserId);
             if (user == null) return;
@@ -187,7 +251,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
             if (rg == null) return;
 
-            if (reaction.Emote.ToString() != rg.Emoji) return;   // ← 修正
+            if (reaction.Emote.ToString() != rg.Emoji) return;
 
             var user = channel.Guild.GetUser(reaction.UserId);
             if (user == null) return;
