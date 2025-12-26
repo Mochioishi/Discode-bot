@@ -84,7 +84,7 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         var embed = new EmbedBuilder()
-            .WithTitle("📝 bottext 予約一覧（全チャンネル）")
+            .WithTitle("📝 bottext 予約一覧（")
             .WithColor(Color.Blue);
 
         var components = new ComponentBuilder();
