@@ -21,7 +21,8 @@ builder.Configuration
 builder.Services.AddSingleton(new DiscordSocketClient(new DiscordSocketConfig
 {
     GatewayIntents =
-        GatewayIntents.AllUnprivileged |
+        GatewayIntents.Guilds |
+        GatewayIntents.GuildMessages |
         GatewayIntents.MessageContent |
         GatewayIntents.GuildMembers |
         GatewayIntents.GuildMessageReactions
@@ -58,10 +59,13 @@ client.Log += msg =>
     return Task.CompletedTask;
 };
 
+// ★★★ SlashCommand を動かすために必要 ★★★
+client.InteractionCreated += handler.HandleInteractionAsync;
+
 // InteractionService 初期化
 await handler.InitializeAsync();
 
-// ReactionAdded / ReactionRemoved
+// ★★★ ReactionAdded / ReactionRemoved ★★★
 client.ReactionAdded += roleModule.OnReactionAdded;
 client.ReactionRemoved += roleModule.OnReactionRemoved;
 
