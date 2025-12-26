@@ -94,17 +94,19 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
 
         var newName = match.NameFormat.Replace("{roomid}", text);
 
-        switch (targetChannel)
+        // --- ここを switch → if/else に変更 ---
+        if (targetChannel is ITextChannel textChannel)
         {
-            case ITextChannel textChannel:
-                await textChannel.ModifyAsync(p => p.Name = newName);
-                break;
-            case IVoiceChannel voiceChannel:
-                await voiceChannel.ModifyAsync(p => p.Name = newName);
-                break;
-            default:
-                // テキスト/ボイス以外（カテゴリなど）は無視
-                return;
+            await textChannel.ModifyAsync(p => p.Name = newName);
+        }
+        else if (targetChannel is IVoiceChannel voiceChannel)
+        {
+            await voiceChannel.ModifyAsync(p => p.Name = newName);
+        }
+        else
+        {
+            // テキスト/ボイス以外（カテゴリなど）は無視
+            return;
         }
 
         await message.AddReactionAsync(new Emoji("🐾"));
