@@ -5,14 +5,13 @@ using Npgsql;
 
 namespace DiscordTimeSignal.Data;
 
-
 public class DataService
 {
     private readonly string _connectionString;
 
     public DataService(IConfiguration configuration)
     {
-        _connectionString = configuration.GetConnectionString("Default") 
+        _connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("Connection string 'Default' not found.");
     }
 
@@ -24,7 +23,7 @@ public class DataService
     // ============================================
     public async Task EnsureTablesAsync()
     {
-        using var conn = CreateConnection();
+        await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync();
 
         var sql = @"
@@ -64,7 +63,7 @@ CREATE TABLE IF NOT EXISTS rolegive (
 );
 ";
 
-        using var cmd = new NpgsqlCommand(sql, (NpgsqlConnection)conn);
+        await using var cmd = new NpgsqlCommand(sql, conn);
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -280,4 +279,45 @@ CREATE TABLE IF NOT EXISTS rolegive (
     }
 }
 
-// DTO / レコード（省略：あなたの元コードのままでOK）
+//
+// DTO / レコード
+//
+
+public record BotTextEntry
+{
+    public long Id { get; init; }
+    public ulong GuildId { get; init; }
+    public ulong ChannelId { get; init; }
+    public string Content { get; init; } = "";
+    public bool IsEmbed { get; init; }
+    public string? EmbedTitle { get; init; }
+    public string TimeHhmm { get; init; } = "00:00";
+}
+
+public record DeleteAgoEntry
+{
+    public long Id { get; init; }
+    public ulong GuildId { get; init; }
+    public ulong ChannelId { get; init; }
+    public int Days { get; init; }
+    public string ProtectMode { get; init; } = "none";
+}
+
+public record PrskRoomIdEntry
+{
+    public long Id { get; init; }
+    public ulong GuildId { get; init; }
+    public ulong WatchChannelId { get; init; }
+    public ulong TargetChannelId { get; init; }
+    public string NameFormat { get; init; } = "ex【{roomid}】";
+}
+
+public record RoleGiveEntry
+{
+    public long Id { get; init; }
+    public ulong GuildId { get; init; }
+    public ulong ChannelId { get; init; }
+    public ulong MessageId { get; init; }
+    public ulong RoleId { get; init; }
+    public string Emoji { get; init; } = "🐾";
+}
