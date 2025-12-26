@@ -1,47 +1,52 @@
 using Discord;
 using Discord.Interactions;
-using Discord.Data;
+using DiscordTimeSignal.Data;
 
-namespace Discord.Modules;
+namespace DiscordTimeSignal.Modules;
 
+[Group("deleteago", "一定期間過ぎたメッセージを自動削除する設定")]
 public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
 {
-    private readonly DataService _db;
+    private readonly DataService _data;
 
-    public CleanerModule(DataService db) => _db = db;
-
-    [SlashCommand("deleteago", "一定期間過ぎたメッセージを自動削除する設定")]
-    public async Task SetCleanup(ITextChannel channel, int days, string protection = "none")
+    public CleanerModule(DataService data)
     {
-        // DataServiceの新しい引数 (guild, channel, days, type) に合わせる
-        await _db.SaveCleanupSettingAsync(Context.Guild.Id, channel.Id, days, protection);
-        await RespondAsync($"{channel.Mention} のメッセージを {days} 日後に自動削除するように設定しました。（保護：{protection}）", ephemeral: true);
+        _data = data;
     }
 
-    [SlashCommand("clean-status", "現在の自動削除設定を確認します")]
-    public async Task Status()
+    [SlashCommand("set", "実行したチャンネルでX日経過したメッセージを自動削除")]
+    public async Task SetAsync(
+        [Summary("days", "何日前より前を削除するか")] int days,
+        [Summary("protect", "保護対象")] ProtectMode protect = ProtectMode.None)
     {
-        // List版のメソッドを呼び出し
-        var settings = await _db.GetCleanupSettingsListAsync(Context.Guild.Id);
-        
-        if (!settings.Any())
+        if (days <= 0 || days > 365)
         {
-            await RespondAsync("設定されているチャンネルはありません。");
+            await RespondAsync("日数は1〜365の間で指定してください。", ephemeral: true);
             return;
         }
 
-        var msg = "現在の設定:\n";
-        foreach (var set in settings)
+        var entry = new DeleteAgoEntry
         {
-            msg += $"<#{set.ChannelId}>: {set.DaysBefore}日後削除 (保護: {set.ProtectionType})\n";
-        }
-        await RespondAsync(msg, ephemeral: true);
-    }
+            Id = 0,
+            GuildId = Context.Guild.Id,
+            ChannelId = Context.Channel.Id,
+            Days = days,
+            ProtectMode = protect.ToString().ToLower()
+        };
 
-    [SlashCommand("clean-off", "自動削除設定を解除します")]
-    public async Task CleanOff()
-    {
-        await _db.DeleteCleanupSettingAsync(Context.Guild.Id);
-        await RespondAsync("設定を解除しました。", ephemeral: true);
+        await _data.AddDeleteAgoAsync(entry);
+
+        await RespondAsync(
+            $"このチャンネルで **{days}日以前** のメッセージを午前4時に自動削除します。\n" +
+            $"保護対象: `{protect}`",
+            ephemeral: true);
     }
+}
+
+public enum ProtectMode
+{
+    None,
+    Image,
+    Reaction,
+    Both
 }
