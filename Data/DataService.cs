@@ -159,6 +159,36 @@ public async Task DeleteDeleteAgoAsync(long id)
 // ============================================================
 // rolegive
 // ============================================================
+
+public async Task<RoleGiveEntry?> GetRoleGiveByIdAsync(long id)
+{
+    using var conn = new NpgsqlConnection(_connectionString);
+    await conn.OpenAsync();
+
+    var cmd = new NpgsqlCommand(
+        @"SELECT id, guild_id, channel_id, message_id, role_id, emoji
+          FROM rolegive
+          WHERE id = @id",
+        conn);
+
+    cmd.Parameters.AddWithValue("id", id);
+
+    using var reader = await cmd.ExecuteReaderAsync();
+
+    if (!await reader.ReadAsync())
+        return null;
+
+    return new RoleGiveEntry
+    {
+        Id = reader.GetInt32(0),
+        GuildId = (ulong)reader.GetInt64(1),
+        ChannelId = (ulong)reader.GetInt64(2),
+        MessageId = (ulong)reader.GetInt64(3),
+        RoleId = (ulong)reader.GetInt64(4),
+        Emoji = reader.GetString(5)
+    };
+}
+
 public async Task<IEnumerable<RoleGiveEntry>> GetRoleGivesByGuildAsync(ulong guildId)
 {
     using var conn = new NpgsqlConnection(_connectionString);
@@ -252,6 +282,7 @@ public async Task DeleteRoleGiveAsync(long id)
 
     await cmd.ExecuteNonQueryAsync();
 }
+
 
 // ============================================================
 // prsk_roomid
