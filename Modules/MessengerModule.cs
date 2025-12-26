@@ -1,47 +1,86 @@
 using Discord;
 using Discord.Interactions;
-using Discord.Data;
+using DiscordTimeSignal.Data;
 
-namespace Discord.Modules;
+namespace DiscordTimeSignal.Modules;
 
+[Group("bottext", "実行したチャンネルでbotを喋らせる")]
 public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
 {
-    private readonly DataService _db;
+    private readonly DataService _data;
 
-    public MessengerModule(DataService db) => _db = db;
-
-    [SlashCommand("bottext", "指定した時間にメッセージを予約送信します")]
-    public async Task AddTask(ITextChannel channel, string content, string time)
+    public MessengerModule(DataService data)
     {
-        if (DateTime.TryParse(time, out var scheduledTime))
-        {
-            await _db.SaveMessageTaskAsync(channel.Id, content, scheduledTime);
-            await RespondAsync($"{time} に送信予約を受け付けました。", ephemeral: true);
-        }
-        else
-        {
-            await RespondAsync("時間の形式が正しくありません。(例: 2025/12/25 18:00)", ephemeral: true);
-        }
+        _data = data;
     }
 
-    [SlashCommand("text-list", "予約中のメッセージ一覧を表示します")]
-    public async Task ListTasks(ITextChannel channel)
+    [SlashCommand("set", "指定した時間にメッセージを予約送信します")]
+    public async Task SetAsync(
+        [Summary("text", "送信するテキスト")] string text,
+        [Summary("time", "hh:mm形式の時間")] string timeHhmm,
+        [Summary("embed", "埋め込み形式で送信するか")] bool isEmbed = false,
+        [Summary("title", "埋め込みタイトル（省略可）")] string? title = null)
     {
-        // 型を MessageTask に統一
-        IEnumerable<MessageTask> tasks = await _db.GetMessageTasksByChannelAsync(channel.Id);
-
-        if (!tasks.Any())
+        if (!TimeSpan.TryParse(timeHhmm, out _))
         {
-            await RespondAsync("予約されたメッセージはありません。");
+            await RespondAsync("時間は `HH:mm` 形式で指定してください。", ephemeral: true);
             return;
         }
 
-        var msg = "現在の予約:\n";
-        foreach (var t in tasks)
+        var entry = new BotTextEntry
         {
-            // DateTime型なのでToStringで表示
-            msg += $"[{t.ScheduledTime:HH:mm}] {t.Content}\n";
+            Id = 0,
+            GuildId = Context.Guild.Id,
+            ChannelId = Context.Channel.Id,
+            Content = text,
+            IsEmbed = isEmbed,
+            EmbedTitle = title,
+            TimeHhmm = timeHhmm
+        };
+
+        var id = await _data.AddBotTextAsync(entry);
+
+        await RespondAsync(
+            $"ID: `{id}` として登録しました。\n" +
+            $"時間: `{timeHhmm}` / 埋め込み: `{isEmbed}`",
+            ephemeral: true);
+    }
+}
+
+[Group("bottext_list", "bottextで登録した内容を一覧にする")]
+public class MessengerListModule : InteractionModuleBase<SocketInteractionContext>
+{
+    private readonly DataService _data;
+
+    public MessengerListModule(DataService data)
+    {
+        _data = data;
+    }
+
+    [SlashCommand("show", "予約中のメッセージ一覧を表示します")]
+    public async Task ShowAsync()
+    {
+        var entries = await _data.GetBotTextsAsync(Context.Guild.Id, Context.Channel.Id);
+        var list = entries.ToList();
+
+        if (list.Count == 0)
+        {
+            await RespondAsync("このチャンネルには予約メッセージがありません。", ephemeral: true);
+            return;
         }
-        await RespondAsync(msg, ephemeral: true);
+
+        var embed = new EmbedBuilder()
+            .WithTitle("bottext 予約一覧")
+            .WithColor(Color.Orange);
+
+        foreach (var e in list)
+        {
+            embed.AddField(
+                $"ID: {e.Id}",
+                $"時間: `{e.TimeHhmm}` / 埋め込み: `{e.IsEmbed}`\n内容: {e.Content}",
+                inline: false);
+        }
+
+        await RespondAsync(embed: embed.Build(), ephemeral: true);
     }
 }
