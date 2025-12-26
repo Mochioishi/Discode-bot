@@ -41,7 +41,7 @@ builder.Services.AddHostedService<TimeSignalWorker>();
 
 var app = builder.Build();
 
-// ★★★ DB テーブル自動生成 ★★★
+// DB 初期化
 var dataService = app.Services.GetRequiredService<DataService>();
 await dataService.EnsureTablesAsync();
 
@@ -59,17 +59,14 @@ client.Log += msg =>
     return Task.CompletedTask;
 };
 
-// ★★★ SlashCommand を動かすために必要 ★★★
-client.InteractionCreated += handler.HandleInteractionAsync;
-
-// InteractionService 初期化
+// InteractionService 初期化（内部で InteractionCreated を登録する）
 await handler.InitializeAsync();
 
-// ★★★ ReactionAdded / ReactionRemoved ★★★
+// ReactionAdded / ReactionRemoved
 client.ReactionAdded += roleModule.OnReactionAdded;
 client.ReactionRemoved += roleModule.OnReactionRemoved;
 
-// ★★★ roomid の MessageReceived を登録 ★★★
+// roomid の MessageReceived を登録
 client.MessageReceived += prskModule.OnMessageReceived;
 
 // Bot 起動
