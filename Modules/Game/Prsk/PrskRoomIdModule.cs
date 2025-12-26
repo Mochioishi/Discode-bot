@@ -21,8 +21,8 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
     // /prsk_roomid
     [SlashCommand("prsk_roomid", "prskのルームID監視とチャンネル名変更を設定します")]
     public async Task PrskRoomIdAsync(
-        [Summary("watch", "ルームIDを監視するチャンネル")] ITextChannel watch,
-        [Summary("target", "名前を変更する対象チャンネル")] ITextChannel target,
+        [Summary("watch", "ルームIDを監視するテキストチャンネル")] ITextChannel watch,
+        [Summary("target", "名前を変更する対象チャンネル（テキストまたはボイス）")] IGuildChannel target,
         [Summary("name_format", "チャンネル名フォーマット（{roomid} が置換される）")]
         string nameFormat = "ex【{roomid}】")
     {
@@ -39,7 +39,7 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
 
         await RespondAsync(
             $"監視チャンネル: {watch.Mention}\n" +
-            $"対象チャンネル: {target.Mention}\n" +
+            $"対象チャンネル: <#{target.Id}>\n" +
             $"フォーマット: `{nameFormat}`\n" +
             $"として登録しました。",
             ephemeral: true);
@@ -88,11 +88,24 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
         var match = entries.FirstOrDefault(e => e.WatchChannelId == channel.Id);
         if (match == null) return;
 
-        var target = channel.Guild.GetTextChannel(match.TargetChannelId);
-        if (target == null) return;
+        var guild = channel.Guild;
+        var targetChannel = guild.GetChannel(match.TargetChannelId);
+        if (targetChannel == null) return;
 
         var newName = match.NameFormat.Replace("{roomid}", text);
-        await target.ModifyAsync(p => p.Name = newName);
+
+        switch (targetChannel)
+        {
+            case ITextChannel textChannel:
+                await textChannel.ModifyAsync(p => p.Name = newName);
+                break;
+            case IVoiceChannel voiceChannel:
+                await voiceChannel.ModifyAsync(p => p.Name = newName);
+                break;
+            default:
+                // テキスト/ボイス以外（カテゴリなど）は無視
+                return;
+        }
 
         await message.AddReactionAsync(new Emoji("🐾"));
     }
