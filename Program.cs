@@ -27,7 +27,7 @@ builder.Services.AddSingleton(new DiscordSocketClient(new DiscordSocketConfig
         GatewayIntents.GuildMembers |
         GatewayIntents.GuildMessageReactions,
 
-    AlwaysDownloadUsers = true,   // ← ★ これがロール付与に必須
+    AlwaysDownloadUsers = true,   // ← ★ GuildUser が null にならないために必須
     LogGatewayIntentWarnings = false
 }));
 
@@ -35,9 +35,9 @@ builder.Services.AddSingleton<InteractionService>();
 builder.Services.AddSingleton<InteractionHandler>();
 builder.Services.AddSingleton<DataService>();
 
-// Modules
-builder.Services.AddSingleton<RoleModule>();
-builder.Services.AddSingleton<PrskRoomIdModule>();
+// Modules（★ Singleton をやめる → InteractionService と二重生成されない）
+builder.Services.AddTransient<RoleModule>();
+builder.Services.AddTransient<PrskRoomIdModule>();
 
 // Worker
 builder.Services.AddHostedService<TimeSignalWorker>();
@@ -51,7 +51,7 @@ await dataService.EnsureTablesAsync();
 var client = app.Services.GetRequiredService<DiscordSocketClient>();
 var handler = app.Services.GetRequiredService<InteractionHandler>();
 
-// Modules
+// Modules（DI から 1 インスタンスだけ取得）
 var roleModule = app.Services.GetRequiredService<RoleModule>();
 var prskModule = app.Services.GetRequiredService<PrskRoomIdModule>();
 
@@ -65,7 +65,7 @@ client.Log += msg =>
 // InteractionService 初期化
 await handler.InitializeAsync();
 
-// ReactionAdded / ReactionRemoved
+// ReactionAdded / ReactionRemoved（★ ここで登録するのは DI の RoleModule だけ）
 client.ReactionAdded += roleModule.OnReactionAdded;
 client.ReactionRemoved += roleModule.OnReactionRemoved;
 
