@@ -5,10 +5,6 @@ using DiscordTimeSignal.Data;
 
 namespace DiscordTimeSignal.Modules.Game.Prsk;
 
-//
-// prsk_roomid 設定コマンド
-//
-[Group("prsk_roomid", "prskのルームID監視・チャンネル名変更")]
 public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly DataService _data;
@@ -22,8 +18,9 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
         _client.MessageReceived += OnMessageReceived;
     }
 
-    [SlashCommand("set", "監視チャンネルと対象チャンネルを登録します")]
-    public async Task SetAsync(
+    // /prsk_roomid
+    [SlashCommand("prsk_roomid", "prskのルームID監視とチャンネル名変更を設定します")]
+    public async Task PrskRoomIdAsync(
         [Summary("watch", "ルームIDを監視するチャンネル")] ITextChannel watch,
         [Summary("target", "名前を変更する対象チャンネル")] ITextChannel target,
         [Summary("name_format", "チャンネル名フォーマット（{roomid} が置換される）")]
@@ -48,45 +45,9 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
             ephemeral: true);
     }
 
-    private async Task OnMessageReceived(SocketMessage message)
-    {
-        if (message.Author.IsBot) return;
-        if (message.Channel is not SocketTextChannel channel) return;
-
-        var text = message.Content.Trim();
-
-        if (!int.TryParse(text, out var num)) return;
-        if (text.Length < 5 || text.Length > 6) return;
-
-        var entries = await _data.GetPrskRoomIdsAsync(channel.Guild.Id);
-        var match = entries.FirstOrDefault(e => e.WatchChannelId == channel.Id);
-        if (match == null) return;
-
-        var target = channel.Guild.GetTextChannel(match.TargetChannelId);
-        if (target == null) return;
-
-        var newName = match.NameFormat.Replace("{roomid}", text);
-        await target.ModifyAsync(p => p.Name = newName);
-
-        await message.AddReactionAsync(new Emoji("🐾"));
-    }
-}
-
-//
-// prsk_roomid_list 一覧コマンド
-//
-[Group("prsk_roomid_list", "prsk_roomid設定の一覧")]
-public class PrskRoomIdListModule : InteractionModuleBase<SocketInteractionContext>
-{
-    private readonly DataService _data;
-
-    public PrskRoomIdListModule(DataService data)
-    {
-        _data = data;
-    }
-
-    [SlashCommand("show", "prsk_roomidで登録した内容を一覧表示します")]
-    public async Task ShowAsync()
+    // /prsk_roomid_list
+    [SlashCommand("prsk_roomid_list", "prsk_roomidで登録した内容を一覧表示します")]
+    public async Task PrskRoomIdListAsync()
     {
         var entries = await _data.GetPrskRoomIdsAsync(Context.Guild.Id);
         var list = entries.ToList();
@@ -110,5 +71,29 @@ public class PrskRoomIdListModule : InteractionModuleBase<SocketInteractionConte
         }
 
         await RespondAsync(embed: embed.Build(), ephemeral: true);
+    }
+
+    private async Task OnMessageReceived(SocketMessage message)
+    {
+        if (message.Author.IsBot) return;
+        if (message.Channel is not SocketTextChannel channel) return;
+
+        var text = message.Content.Trim();
+
+        // 5〜6桁の数字のみ対象
+        if (!int.TryParse(text, out var num)) return;
+        if (text.Length < 5 || text.Length > 6) return;
+
+        var entries = await _data.GetPrskRoomIdsAsync(channel.Guild.Id);
+        var match = entries.FirstOrDefault(e => e.WatchChannelId == channel.Id);
+        if (match == null) return;
+
+        var target = channel.Guild.GetTextChannel(match.TargetChannelId);
+        if (target == null) return;
+
+        var newName = match.NameFormat.Replace("{roomid}", text);
+        await target.ModifyAsync(p => p.Name = newName);
+
+        await message.AddReactionAsync(new Emoji("🐾"));
     }
 }
