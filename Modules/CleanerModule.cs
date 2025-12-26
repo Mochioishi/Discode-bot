@@ -45,7 +45,7 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
         await _data.AddDeleteAgoAsync(entry);
 
         await RespondAsync(
-            $"このチャンネルで **{days}日以前** のメッセージを午前4時に自動削除します。\n" +
+            $"このチャンネルで **{days}日以前** のメッセージを自動削除します。\n" +
             $"保護対象: `{protect}`",
             ephemeral: true);
     }
@@ -66,7 +66,7 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         var embed = new EmbedBuilder()
-            .WithTitle("🗑 deleteago 設定一覧（全チャンネル）")
+            .WithTitle("🗑 deleteago 設定一覧")
             .WithColor(Color.Blue);
 
         var components = new ComponentBuilder();
