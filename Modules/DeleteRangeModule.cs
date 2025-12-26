@@ -9,7 +9,7 @@ public class DeleteRangeModule : InteractionModuleBase<SocketInteractionContext>
     private static readonly Dictionary<(ulong GuildId, ulong ChannelId, ulong UserId), ulong> RangeStart
         = new();
 
-    [MessageCommand("Delete_Range_Start")]
+    [MessageCommand("範囲削除開始")]
     public async Task SetStartAsync(IMessage message)
     {
         var key = (Context.Guild.Id, Context.Channel.Id, Context.User.Id);
@@ -20,7 +20,7 @@ public class DeleteRangeModule : InteractionModuleBase<SocketInteractionContext>
             ephemeral: true);
     }
 
-    [MessageCommand("Delete_Range_End")]
+    [MessageCommand("範囲削除終了")]
     public async Task SetEndAsync(IMessage message)
     {
         var key = (Context.Guild.Id, Context.Channel.Id, Context.User.Id);
