@@ -4,6 +4,9 @@ using DiscordTimeSignal.Data;
 
 namespace DiscordTimeSignal.Modules;
 
+//
+// deleteago 設定コマンド
+//
 [Group("deleteago", "一定期間過ぎたメッセージを自動削除する設定")]
 public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
 {
@@ -51,8 +54,9 @@ public enum ProtectMode
     Both
 }
 
-namespace DiscordTimeSignal.Modules;
-
+//
+// deleteago 一覧コマンド
+//
 [Group("deleteago_list", "deleteagoで登録した内容を一覧表示")]
 public class CleanerListModule : InteractionModuleBase<SocketInteractionContext>
 {
@@ -89,8 +93,4 @@ public class CleanerListModule : InteractionModuleBase<SocketInteractionContext>
 
         await RespondAsync(embed: embed.Build(), ephemeral: true);
     }
-
-    // 削除・編集ボタンは Component Interaction で作りこめるが、
-    // ここでは設計・構造優先のため一覧表示までを実装。
 }
-
