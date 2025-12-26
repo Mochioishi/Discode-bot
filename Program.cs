@@ -4,6 +4,7 @@ using Discord.WebSocket;
 using DiscordTimeSignal.Data;
 using DiscordTimeSignal.Handlers;
 using DiscordTimeSignal.Workers;
+using DiscordTimeSignal.Modules;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
