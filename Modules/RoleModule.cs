@@ -76,9 +76,13 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     {
         if (reaction.UserId == _client.CurrentUser.Id) return;
 
+        // 🔥 最重要：ch.Value に触れる前に HasValue を確認
+        if (!ch.HasValue) return;
+
         var channel = ch.Value as SocketTextChannel;
         if (channel == null) return;
 
+        // ① rolegive 実行直後の登録処理
         if (Pending.TryGetValue(reaction.UserId, out var pending))
         {
             if (pending.GuildId == channel.Guild.Id && pending.ChannelId == channel.Id)
@@ -97,21 +101,19 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
                 var msg = await cache.GetOrDownloadAsync();
                 if (msg != null)
-                {
                     await msg.AddReactionAsync(reaction.Emote);
-                }
 
                 Pending.Remove(reaction.UserId);
                 return;
             }
         }
 
+        // ② 通常のロール付与処理
         var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
         if (rg == null) return;
 
         if (reaction.Emote.ToString() != rg.Emoji) return;
 
-        // 🔥 Discord.Net v3 では GetUserAsync が無い → GetUser() を使う
         var user = channel.Guild.GetUser(reaction.UserId);
         if (user == null) return;
 
@@ -126,6 +128,9 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         SocketReaction reaction)
     {
         if (reaction.UserId == _client.CurrentUser.Id) return;
+
+        // 🔥 最重要：ch.Value に触れる前に HasValue を確認
+        if (!ch.HasValue) return;
 
         var channel = ch.Value as SocketTextChannel;
         if (channel == null) return;
