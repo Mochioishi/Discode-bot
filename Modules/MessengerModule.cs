@@ -4,7 +4,6 @@ using DiscordTimeSignal.Data;
 
 namespace DiscordTimeSignal.Modules;
 
-[Group("bottext", "実行したチャンネルでbotを喋らせる")]
 public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly DataService _data;
@@ -14,13 +13,37 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
         _data = data;
     }
 
-    [SlashCommand("set", "指定した時間にメッセージを予約送信します")]
-    public async Task SetAsync(
+    // /bottext
+    [SlashCommand("bottext", "実行したチャンネルでbotを喋らせる")]
+    public async Task BotTextAsync(
         [Summary("text", "送信するテキスト")] string text,
-        [Summary("time", "hh:mm形式の時間")] string timeHhmm,
+        [Summary("time", "hh:mm形式の時間（省略時は即時送信）")] string? timeHhmm = null,
         [Summary("embed", "埋め込み形式で送信するか")] bool isEmbed = false,
         [Summary("title", "埋め込みタイトル（省略可）")] string? title = null)
     {
+        // time 未指定 → 即時送信
+        if (string.IsNullOrWhiteSpace(timeHhmm))
+        {
+            if (isEmbed)
+            {
+                var embed = new EmbedBuilder()
+                    .WithTitle(string.IsNullOrWhiteSpace(title) ? null : title)
+                    .WithDescription(text)
+                    .WithColor(Color.Orange)
+                    .Build();
+
+                await Context.Channel.SendMessageAsync(embed: embed);
+            }
+            else
+            {
+                await Context.Channel.SendMessageAsync(text);
+            }
+
+            await RespondAsync("メッセージを即時送信しました。", ephemeral: true);
+            return;
+        }
+
+        // 予約送信
         if (!TimeSpan.TryParse(timeHhmm, out _))
         {
             await RespondAsync("時間は `HH:mm` 形式で指定してください。", ephemeral: true);
@@ -41,24 +64,14 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
         var id = await _data.AddBotTextAsync(entry);
 
         await RespondAsync(
-            $"ID: `{id}` として登録しました。\n" +
+            $"ID: `{id}` として予約しました。\n" +
             $"時間: `{timeHhmm}` / 埋め込み: `{isEmbed}`",
             ephemeral: true);
     }
-}
 
-[Group("bottext_list", "bottextで登録した内容を一覧にする")]
-public class MessengerListModule : InteractionModuleBase<SocketInteractionContext>
-{
-    private readonly DataService _data;
-
-    public MessengerListModule(DataService data)
-    {
-        _data = data;
-    }
-
-    [SlashCommand("show", "予約中のメッセージ一覧を表示します")]
-    public async Task ShowAsync()
+    // /bottext_list
+    [SlashCommand("bottext_list", "bottextで登録した内容を一覧にする")]
+    public async Task BotTextListAsync()
     {
         var entries = await _data.GetBotTextsAsync(Context.Guild.Id, Context.Channel.Id);
         var list = entries.ToList();
