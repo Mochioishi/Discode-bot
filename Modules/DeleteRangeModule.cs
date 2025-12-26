@@ -16,8 +16,7 @@ public class DeleteRangeModule : InteractionModuleBase<SocketInteractionContext>
         RangeStart[key] = message.Id;
 
         await RespondAsync(
-            $"開始位置をメッセージID `{message.Id}` に設定しました。\n" +
-            $"削除範囲の最後のメッセージで `Delete_Range_End` を実行してください。",
+            $"開始位置を設定しました",
             ephemeral: true);
     }
 
@@ -61,6 +60,6 @@ public class DeleteRangeModule : InteractionModuleBase<SocketInteractionContext>
 
         RangeStart.Remove(key);
 
-        await RespondAsync($"メッセージ `{start}` から `{end}` までを削除しました。", ephemeral: true);
+        await RespondAsync($"メッセージを **{count} 件** 削除しました。", ephemeral: true);
     }
 }
