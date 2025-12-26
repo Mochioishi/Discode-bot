@@ -18,8 +18,56 @@ public class DataService
     private IDbConnection CreateConnection()
         => new NpgsqlConnection(_connectionString);
 
-    // ---------- bottext ----------
+    // ============================================
+    //  テーブル自動生成
+    // ============================================
+    public async Task EnsureTablesAsync()
+    {
+        using var conn = CreateConnection();
+        await conn.OpenAsync();
 
+        var sql = @"
+CREATE TABLE IF NOT EXISTS bottext (
+    id SERIAL PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    content TEXT NOT NULL,
+    is_embed BOOLEAN NOT NULL DEFAULT FALSE,
+    embed_title TEXT,
+    time_hhmm TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS deleteago (
+    id SERIAL PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    days INT NOT NULL,
+    protect_mode TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS prsk_roomid (
+    id SERIAL PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    watch_channel_id BIGINT NOT NULL,
+    target_channel_id BIGINT NOT NULL,
+    name_format TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rolegive (
+    id SERIAL PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
+    role_id BIGINT NOT NULL,
+    emoji TEXT NOT NULL
+);
+";
+
+        using var cmd = new NpgsqlCommand(sql, (NpgsqlConnection)conn);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    // ---------- bottext ----------
     public async Task<IEnumerable<BotTextEntry>> GetBotTextsAsync(ulong guildId, ulong channelId)
     {
         const string sql = """
@@ -61,7 +109,6 @@ public class DataService
     }
 
     // ---------- deleteago ----------
-
     public async Task<IEnumerable<DeleteAgoEntry>> GetDeleteAgoAsync(ulong guildId, ulong channelId)
     {
         const string sql = """
@@ -124,7 +171,6 @@ public class DataService
     }
 
     // ---------- prsk_roomid ----------
-
     public async Task<IEnumerable<PrskRoomIdEntry>> GetPrskRoomIdsAsync(ulong guildId)
     {
         const string sql = """
@@ -164,7 +210,6 @@ public class DataService
     }
 
     // ---------- rolegive ----------
-
     public async Task<IEnumerable<RoleGiveEntry>> GetRoleGivesAsync(ulong guildId, ulong channelId)
     {
         const string sql = """
@@ -232,48 +277,6 @@ public class DataService
         using var conn = CreateConnection();
         return await conn.QueryAsync<RoleGiveEntry>(sql, new { GuildId = (long)guildId });
     }
-
-    // ---------- Delete_Range（メモリで十分ならDB不要でもOKだが、ここではDB版雛形だけ） ----------
-    // 必要ならここに range 用テーブルのCRUDを書く
 }
 
-// DTO / レコード
-
-public record BotTextEntry
-{
-    public long Id { get; init; }
-    public ulong GuildId { get; init; }
-    public ulong ChannelId { get; init; }
-    public string Content { get; init; } = "";
-    public bool IsEmbed { get; init; }
-    public string? EmbedTitle { get; init; }
-    public string TimeHhmm { get; init; } = "00:00";
-}
-
-public record DeleteAgoEntry
-{
-    public long Id { get; init; }
-    public ulong GuildId { get; init; }
-    public ulong ChannelId { get; init; }
-    public int Days { get; init; }
-    public string ProtectMode { get; init; } = "none"; // none,image,reaction,both
-}
-
-public record PrskRoomIdEntry
-{
-    public long Id { get; init; }
-    public ulong GuildId { get; init; }
-    public ulong WatchChannelId { get; init; }
-    public ulong TargetChannelId { get; init; }
-    public string NameFormat { get; init; } = "ex【{roomid}】";
-}
-
-public record RoleGiveEntry
-{
-    public long Id { get; init; }
-    public ulong GuildId { get; init; }
-    public ulong ChannelId { get; init; }
-    public ulong MessageId { get; init; }
-    public ulong RoleId { get; init; }
-    public string Emoji { get; init; } = "🐾";
-}
+// DTO / レコード（省略：あなたの元コードのままでOK）
