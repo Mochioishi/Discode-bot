@@ -120,12 +120,13 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
         if (reaction.Emote.ToString() != rg.Emoji) return;
 
-        if (channel.Guild.GetUser(reaction.UserId) is SocketGuildUser user)
-        {
-            var role = channel.Guild.GetRole(rg.RoleId);
-            if (role != null)
-                await user.AddRoleAsync(role);
-        }
+        // 🔥 Guild.GetUser() は null の可能性 → API から取得する
+        var user = await channel.Guild.GetUserAsync(reaction.UserId);
+        if (user == null) return;
+
+        var role = channel.Guild.GetRole(rg.RoleId);
+        if (role != null)
+            await user.AddRoleAsync(role);
     }
 
     // リアクション削除 → ロールはく奪
@@ -144,11 +145,12 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
         if (reaction.Emote.ToString() != rg.Emoji) return;
 
-        if (channel.Guild.GetUser(reaction.UserId) is SocketGuildUser user)
-        {
-            var role = channel.Guild.GetRole(rg.RoleId);
-            if (role != null)
-                await user.RemoveRoleAsync(role);
-        }
+        // 🔥 ここも API から取得
+        var user = await channel.Guild.GetUserAsync(reaction.UserId);
+        if (user == null) return;
+
+        var role = channel.Guild.GetRole(rg.RoleId);
+        if (role != null)
+            await user.RemoveRoleAsync(role);
     }
 }
