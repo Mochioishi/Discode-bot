@@ -8,14 +8,10 @@ namespace DiscordTimeSignal.Modules.Game.Prsk;
 public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly DataService _data;
-    private readonly DiscordSocketClient _client;
 
-    public PrskRoomIdModule(DataService data, DiscordSocketClient client)
+    public PrskRoomIdModule(DataService data)
     {
         _data = data;
-        _client = client;
-
-        _client.MessageReceived += OnMessageReceived;
     }
 
     // /prsk_roomid
@@ -28,7 +24,6 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
     {
         var entry = new PrskRoomIdEntry
         {
-            Id = 0,
             GuildId = Context.Guild.Id,
             WatchChannelId = watch.Id,
             TargetChannelId = target.Id,
@@ -73,42 +68,42 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
         await RespondAsync(embed: embed.Build(), ephemeral: true);
     }
 
-    private async Task OnMessageReceived(SocketMessage message)
+    // Program.cs で登録される
+    public async Task OnMessageReceived(SocketMessage message)
     {
-        if (message.Author.IsBot) return;
-        if (message.Channel is not SocketTextChannel channel) return;
-
-        var text = message.Content.Trim();
-
-        // 5〜6桁の数字のみ対象
-        if (!int.TryParse(text, out var num)) return;
-        if (text.Length < 5 || text.Length > 6) return;
-
-        var entries = await _data.GetPrskRoomIdsAsync(channel.Guild.Id);
-        var match = entries.FirstOrDefault(e => e.WatchChannelId == channel.Id);
-        if (match == null) return;
-
-        var guild = channel.Guild;
-        var targetChannel = guild.GetChannel(match.TargetChannelId);
-        if (targetChannel == null) return;
-
-        var newName = match.NameFormat.Replace("{roomid}", text);
-
-        // --- ここを switch → if/else に変更 ---
-        if (targetChannel is ITextChannel textChannel)
+        try
         {
-            await textChannel.ModifyAsync(p => p.Name = newName);
-        }
-        else if (targetChannel is IVoiceChannel voiceChannel)
-        {
-            await voiceChannel.ModifyAsync(p => p.Name = newName);
-        }
-        else
-        {
-            // テキスト/ボイス以外（カテゴリなど）は無視
-            return;
-        }
+            if (message.Author.IsBot) return;
+            if (message.Channel is not SocketTextChannel channel) return;
 
-        await message.AddReactionAsync(new Emoji("🐾"));
+            var text = message.Content.Trim();
+
+            // 5〜6桁の数字のみ対象
+            if (!int.TryParse(text, out var num)) return;
+            if (text.Length < 5 || text.Length > 6) return;
+
+            var entries = await _data.GetPrskRoomIdsAsync(channel.Guild.Id);
+            var match = entries.FirstOrDefault(e => e.WatchChannelId == channel.Id);
+            if (match == null) return;
+
+            var guild = channel.Guild;
+            var targetChannel = guild.GetChannel(match.TargetChannelId);
+            if (targetChannel == null) return;
+
+            var newName = match.NameFormat.Replace("{roomid}", text);
+
+            if (targetChannel is ITextChannel textChannel)
+                await textChannel.ModifyAsync(p => p.Name = newName);
+            else if (targetChannel is IVoiceChannel voiceChannel)
+                await voiceChannel.ModifyAsync(p => p.Name = newName);
+            else
+                return;
+
+            await message.AddReactionAsync(new Emoji("🐾"));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PrskRoomId ERROR] {ex}");
+        }
     }
 }
