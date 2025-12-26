@@ -1,5 +1,6 @@
 using Discord;
 using Discord.Interactions;
+using Discord.WebSocket;
 using DiscordTimeSignal.Data;
 
 namespace DiscordTimeSignal.Modules;
@@ -96,31 +97,63 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
         await RespondAsync($"ID {entryId} を削除しました。", ephemeral: true);
     }
 
-    // 編集ボタン → Modal を開く
+    // 編集ボタン → Modal（"日数のみ"）
     [ComponentInteraction("edit_deleteago_*")]
     public async Task EditDeleteAgoAsync(string id)
     {
         await RespondWithModalAsync<DeleteAgoEditModal>($"edit_deleteago_modal_{id}");
     }
 
-    // Modal の受け取り
+    // Modal の受け取り → 日数だけ更新 → SelectMenu を出す
     [ModalInteraction("edit_deleteago_modal_*")]
     public async Task EditDeleteAgoModalAsync(string id, DeleteAgoEditModal modal)
     {
         long entryId = long.Parse(id);
 
+        // 日数だけ更新
         await _data.UpdateDeleteAgoAsync(new DeleteAgoEntry
         {
             Id = entryId,
-            Days = modal.Days,
-            ProtectMode = modal.ProtectMode.ToLower()
+            Days = modal.Days
         });
 
-        await RespondAsync("更新しました。", ephemeral: true);
+        // 保護モード選択メニュー
+        var menu = new SelectMenuBuilder()
+            .WithCustomId($"edit_deleteago_protect_{entryId}")
+            .WithPlaceholder("保護対象を選択")
+            .AddOption("なし", "none")
+            .AddOption("画像のみ保護", "image")
+            .AddOption("リアクションのみ保護", "reaction")
+            .AddOption("両方保護", "both");
+
+        var builder = new ComponentBuilder()
+            .WithSelectMenu(menu);
+
+        await RespondAsync(
+            text: "保護対象を選択してください。",
+            components: builder.Build(),
+            ephemeral: true
+        );
+    }
+
+    // SelectMenu の受け取り → ProtectMode 更新
+    [ComponentInteraction("edit_deleteago_protect_*")]
+    public async Task EditDeleteAgoProtectAsync(string id, string[] selected)
+    {
+        long entryId = long.Parse(id);
+        string protect = selected[0];
+
+        await _data.UpdateDeleteAgoAsync(new DeleteAgoEntry
+        {
+            Id = entryId,
+            ProtectMode = protect
+        });
+
+        await RespondAsync($"更新しました。\n保護対象: `{protect}`", ephemeral: true);
     }
 }
 
-// Modal 定義
+// Modal（"日数のみ"）
 public class DeleteAgoEditModal : IModal
 {
     public string Title => "deleteago の編集";
@@ -128,8 +161,4 @@ public class DeleteAgoEditModal : IModal
     [InputLabel("日数")]
     [ModalTextInput("days", placeholder: "例: 7")]
     public int Days { get; set; }
-
-    [InputLabel("保護対象 (none/image/reaction/both)")]
-    [ModalTextInput("protect", placeholder: "none")]
-    public string ProtectMode { get; set; }
 }
