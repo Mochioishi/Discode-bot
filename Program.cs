@@ -37,6 +37,10 @@ builder.Services.AddHostedService<TimeSignalWorker>();
 
 var app = builder.Build();
 
+// ★★★ ここで DataService を取り出してテーブル自動生成 ★★★
+var dataService = app.Services.GetRequiredService<DataService>();
+await dataService.EnsureTablesAsync();   // ← Railway でも確実にテーブルが作られる
+
 var client = app.Services.GetRequiredService<DiscordSocketClient>();
 var handler = app.Services.GetRequiredService<InteractionHandler>();
 var roleModule = app.Services.GetRequiredService<RoleModule>();
