@@ -54,18 +54,37 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         var embed = new EmbedBuilder()
-            .WithTitle("prsk_roomid 設定一覧")
-            .WithColor(Color.Purple);
+            .WithTitle("🎵 prsk_roomid 設定一覧（全チャンネル）")
+            .WithColor(Color.Blue);
+
+        var components = new ComponentBuilder();
 
         foreach (var e in list)
         {
             embed.AddField(
                 $"ID: {e.Id}",
-                $"監視: <#{e.WatchChannelId}>\n対象: <#{e.TargetChannelId}>\nformat: `{e.NameFormat}`",
+                $"監視: <#{e.WatchChannelId}>\n" +
+                $"対象: <#{e.TargetChannelId}>\n" +
+                $"format: `{e.NameFormat}`",
                 inline: false);
+
+            components.WithButton(
+                $"削除 {e.Id}",
+                $"delete_prsk_{e.Id}",
+                ButtonStyle.Danger
+            );
         }
 
-        await RespondAsync(embed: embed.Build(), ephemeral: true);
+        await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
+    }
+
+    // 削除ボタン
+    [ComponentInteraction("delete_prsk_*")]
+    public async Task DeletePrskAsync(string id)
+    {
+        long entryId = long.Parse(id);
+        await _data.DeletePrskRoomIdAsync(entryId);
+        await RespondAsync($"ID {entryId} を削除しました。", ephemeral: true);
     }
 
     // Program.cs で登録される
@@ -96,8 +115,6 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
                 await textChannel.ModifyAsync(p => p.Name = newName);
             else if (targetChannel is IVoiceChannel voiceChannel)
                 await voiceChannel.ModifyAsync(p => p.Name = newName);
-            else
-                return;
 
             await message.AddReactionAsync(new Emoji("🐾"));
         }
