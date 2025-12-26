@@ -5,13 +5,19 @@ using DiscordTimeSignal.Data;
 
 namespace DiscordTimeSignal.Modules;
 
-[Group("rolegive", "リアクションでロール付与/はく奪")]
+public class PendingRoleGive
+{
+    public ulong GuildId { get; set; }
+    public ulong ChannelId { get; set; }
+    public ulong RoleId { get; set; }
+}
+
 public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly DataService _data;
     private readonly DiscordSocketClient _client;
 
-    // rolegive 実行後の「待機状態」
+    // /rolegive 実行後の「待機状態」: key = UserId
     private static readonly Dictionary<ulong, PendingRoleGive> Pending = new();
 
     public RoleModule(DataService data, DiscordSocketClient client)
@@ -23,38 +29,67 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         _client.ReactionRemoved += OnReactionRemoved;
     }
 
-    [SlashCommand("set", "リアクションロールを設定します")]
-    public async Task SetAsync(
-        [Summary("role", "付与するロール")] IRole role,
-        [Summary("emoji", "リアクション絵文字（省略時🐾）")] string emoji = "🐾")
+    // /rolegive
+    [SlashCommand("rolegive", "リアクションでロール付与/はく奪する設定を開始します")]
+    public async Task RoleGiveAsync(
+        [Summary("role", "付与するロール")] IRole role)
     {
-        // 待機状態を保存
         Pending[Context.User.Id] = new PendingRoleGive
         {
             GuildId = Context.Guild.Id,
             ChannelId = Context.Channel.Id,
-            RoleId = role.Id,
-            Emoji = emoji
+            RoleId = role.Id
         };
 
         await RespondAsync(
             $"ロール `{role.Name}` を設定します。\n" +
-            $"対象にしたいメッセージに `{emoji}` でリアクションしてください。",
+            $"対象にしたいメッセージに、使いたい絵文字でリアクションしてください。",
             ephemeral: true);
     }
 
-    private async Task OnReactionAdded(Cacheable<IUserMessage, ulong> cache, Cacheable<IMessageChannel, ulong> ch, SocketReaction reaction)
+    // /rolegive_list
+    [SlashCommand("rolegive_list", "rolegiveで登録した内容を一覧にする")]
+    public async Task RoleGiveListAsync()
+    {
+        var entries = await _data.GetRoleGivesAsync(Context.Guild.Id, Context.Channel.Id);
+        var list = entries.ToList();
+
+        if (list.Count == 0)
+        {
+            await RespondAsync("このチャンネルには rolegive 設定がありません。", ephemeral: true);
+            return;
+        }
+
+        var embed = new EmbedBuilder()
+            .WithTitle("rolegive 設定一覧")
+            .WithColor(Color.Green);
+
+        foreach (var e in list)
+        {
+            embed.AddField(
+                $"ID: {e.Id}",
+                $"メッセージ: `{e.MessageId}` / ロール: `{e.RoleId}` / 絵文字: `{e.Emoji}`",
+                inline: false);
+        }
+
+        await RespondAsync(embed: embed.Build(), ephemeral: true);
+    }
+
+    // リアクション追加
+    private async Task OnReactionAdded(
+        Cacheable<IUserMessage, ulong> cache,
+        Cacheable<IMessageChannel, ulong> ch,
+        SocketReaction reaction)
     {
         if (reaction.UserId == _client.CurrentUser.Id) return;
         if (ch.Value is not SocketTextChannel channel) return;
 
-        // ① 待機状態のユーザーがリアクションしたか？
+        // ① rolegive 実行直後の「最初のリアクション」チェック
         if (Pending.TryGetValue(reaction.UserId, out var pending))
         {
-            // 待機状態のギルド・チャンネルと一致しているか
             if (pending.GuildId == channel.Guild.Id && pending.ChannelId == channel.Id)
             {
-                // このメッセージを rolegive の対象として登録
+                // このメッセージと絵文字を対象として登録
                 var entry = new RoleGiveEntry
                 {
                     Id = 0,
@@ -62,23 +97,21 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
                     ChannelId = pending.ChannelId,
                     MessageId = reaction.MessageId,
                     RoleId = pending.RoleId,
-                    Emoji = pending.Emoji
+                    Emoji = reaction.Emote.ToString()
                 };
 
                 await _data.AddRoleGiveAsync(entry);
 
-                // Bot が対象メッセージにリアクションを付ける
+                // Bot が対象メッセージに同じリアクションを付ける
                 var msg = await cache.GetOrDownloadAsync();
-                await msg.AddReactionAsync(new Emoji(pending.Emoji));
+                await msg.AddReactionAsync(reaction.Emote);
 
-                // 待機状態を削除
                 Pending.Remove(reaction.UserId);
-
                 return;
             }
         }
 
-        // ② 通常の rolegive 処理（ロール付与）
+        // ② 通常の rolegive ロジック（ロール付与）
         var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
         if (rg == null) return;
 
@@ -92,7 +125,11 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         }
     }
 
-    private async Task OnReactionRemoved(Cacheable<IUserMessage, ulong> cache, Cacheable<IMessageChannel, ulong> ch, SocketReaction reaction)
+    // リアクション削除 → ロールはく奪
+    private async Task OnReactionRemoved(
+        Cacheable<IUserMessage, ulong> cache,
+        Cacheable<IMessageChannel, ulong> ch,
+        SocketReaction reaction)
     {
         if (reaction.UserId == _client.CurrentUser.Id) return;
         if (ch.Value is not SocketTextChannel channel) return;
@@ -109,12 +146,4 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
                 await user.RemoveRoleAsync(role);
         }
     }
-}
-
-public class PendingRoleGive
-{
-    public ulong GuildId { get; set; }
-    public ulong ChannelId { get; set; }
-    public ulong RoleId { get; set; }
-    public string Emoji { get; set; } = "🐾";
 }
