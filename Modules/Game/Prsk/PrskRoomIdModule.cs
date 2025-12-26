@@ -33,50 +33,56 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
         await _data.AddPrskRoomIdAsync(entry);
 
         await RespondAsync(
-            $"監視チャンネル: {watch.Mention}\n" +
+            $"監視チャンネル: {watch.Mention}，" +
             $"対象チャンネル: <#{target.Id}>\n" +
-            $"オリジナルネーム: `{(string.IsNullOrWhiteSpace(nameFormat) ? "(なし)" : nameFormat)}`\n" +
+            $"オリジナルネーム: `{(string.IsNullOrWhiteSpace(nameFormat) ? "(なし)" : nameFormat)}`" +
             $"として登録しました。",
             ephemeral: true);
     }
 
     // /prsk_roomid_list
-    [SlashCommand("prsk_roomid_list", "prsk_roomidで登録した内容を一覧表示します")]
-    public async Task PrskRoomIdListAsync()
+[SlashCommand("prsk_roomid_list", "prsk_roomidで登録した内容を一覧表示します")]
+public async Task PrskRoomIdListAsync()
+{
+    var entries = await _data.GetPrskRoomIdsAsync(Context.Guild.Id);
+    var list = entries.ToList();
+
+    if (list.Count == 0)
     {
-        var entries = await _data.GetPrskRoomIdsAsync(Context.Guild.Id);
-        var list = entries.ToList();
-
-        if (list.Count == 0)
-        {
-            await RespondAsync("このサーバーには prsk_roomid の設定がありません。", ephemeral: true);
-            return;
-        }
-
-        var embed = new EmbedBuilder()
-            .WithTitle("🎵 prsk_roomid 設定一覧")
-            .WithColor(Color.Blue);
-
-        var components = new ComponentBuilder();
-
-        foreach (var e in list)
-        {
-            embed.AddField(
-                $"ID: {e.Id}",
-                $"監視: <#{e.WatchChannelId}>\n" +
-                $"対象: <#{e.TargetChannelId}>\n" +
-                $"オリジナルネーム: `{(string.IsNullOrWhiteSpace(e.NameFormat) ? "(なし)" : e.NameFormat)}`",
-                inline: false);
-
-            components.WithButton(
-                $"削除 {e.Id}",
-                $"delete_prsk_{e.Id}",
-                ButtonStyle.Danger
-            );
-        }
-
-        await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
+        await RespondAsync("このサーバーには prsk_roomid の設定がありません。", ephemeral: true);
+        return;
     }
+
+    var embed = new EmbedBuilder()
+        .WithTitle("🎵 prsk_roomid 設定一覧")
+        .WithColor(Color.Blue);
+
+    var components = new ComponentBuilder();
+
+    int index = 1;
+
+    foreach (var e in list)
+    {
+        embed.AddField(
+            $"No.{index}",
+            $"監視: <#{e.WatchChannelId}>\n" +
+            $"対象: <#{e.TargetChannelId}>\n" +
+            $"オリジナルネーム: `{(string.IsNullOrWhiteSpace(e.NameFormat) ? "(なし)" : e.NameFormat)}`",
+            inline: false);
+
+        // ボタンは DB の ID を使う（内部識別子）
+        components.WithButton(
+            $"削除 No.{index}",
+            $"delete_prsk_{e.Id}",
+            ButtonStyle.Danger
+        );
+
+        index++;
+    }
+
+    await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
+}
+
 
     // 削除ボタン
     [ComponentInteraction("delete_prsk_*")]
