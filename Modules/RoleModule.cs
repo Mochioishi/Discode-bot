@@ -24,6 +24,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     {
         _data = data;
         _client = client;
+        // ※ イベント登録は Program.cs で行うためここでは何もしない
     }
 
     // /rolegive
@@ -65,7 +66,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         {
             embed.AddField(
                 $"ID: {e.Id}",
-                $"メッセージ: `{e.MessageId}` / ロール: `{e.RoleId}` / 絵文字: `{e.Emoji}`",
+                $"メッセージ: `{e.MessageId}` / ロール: <@&{e.RoleId}> / 絵文字: `{e.Emoji}`",
                 inline: false);
         }
 
@@ -79,7 +80,9 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         SocketReaction reaction)
     {
         if (reaction.UserId == _client.CurrentUser.Id) return;
-        if (ch.Value is not SocketTextChannel channel) return;
+
+        var channel = ch.Value as SocketTextChannel;
+        if (channel == null) return;
 
         // ① rolegive 実行直後の「最初のリアクション」チェック
         if (Pending.TryGetValue(reaction.UserId, out var pending))
@@ -127,7 +130,9 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         SocketReaction reaction)
     {
         if (reaction.UserId == _client.CurrentUser.Id) return;
-        if (ch.Value is not SocketTextChannel channel) return;
+
+        var channel = ch.Value as SocketTextChannel;
+        if (channel == null) return;
 
         var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
         if (rg == null) return;
