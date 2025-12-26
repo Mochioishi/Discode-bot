@@ -30,7 +30,7 @@ builder.Services.AddSingleton<InteractionService>();
 builder.Services.AddSingleton<InteractionHandler>();
 builder.Services.AddSingleton<DataService>();
 
-// RoleModule を DI に登録（イベント呼び出しに必要）
+// RoleModule を DI に登録
 builder.Services.AddSingleton<RoleModule>();
 
 builder.Services.AddHostedService<TimeSignalWorker>();
@@ -51,7 +51,7 @@ client.Log += msg =>
 // InteractionService 初期化
 await handler.InitializeAsync();
 
-// ReactionAdded / ReactionRemoved
+// ReactionAdded / ReactionRemoved をここで登録
 client.ReactionAdded += async (cache, ch, reaction) =>
 {
     await roleModule.OnReactionAdded(cache, ch, reaction);
