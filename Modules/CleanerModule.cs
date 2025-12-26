@@ -54,7 +54,7 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("deleteago_list", "deleteagoで登録した内容を一覧表示")]
     public async Task DeleteAgoListAsync()
     {
-        var entries = await _data.GetDeleteAgoAsync(Context.Guild.Id, Context.Channel.Id);
+        var entries = await _data.GetAllDeleteAgoAsync(Context.Guild.Id, Context.Channel.Id);
         var list = entries.ToList();
 
         if (list.Count == 0)
