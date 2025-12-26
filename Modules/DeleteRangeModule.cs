@@ -4,14 +4,6 @@ using Discord.WebSocket;
 
 namespace DiscordTimeSignal.Modules;
 
-public enum ProtectMode
-{
-    None,
-    Image,
-    Reaction,
-    Both
-}
-
 public class DeleteRangeModule : InteractionModuleBase<SocketInteractionContext>
 {
     private static readonly Dictionary<(ulong GuildId, ulong ChannelId, ulong UserId), ulong> RangeStart = new();
