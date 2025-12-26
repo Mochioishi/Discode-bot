@@ -54,7 +54,7 @@ public class PrskRoomIdModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         var embed = new EmbedBuilder()
-            .WithTitle("🎵 prsk_roomid 設定一覧（全チャンネル）")
+            .WithTitle("🎵 prsk_roomid 設定一覧")
             .WithColor(Color.Blue);
 
         var components = new ComponentBuilder();
