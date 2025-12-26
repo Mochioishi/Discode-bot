@@ -17,17 +17,14 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     private readonly DataService _data;
     private readonly DiscordSocketClient _client;
 
-    // /rolegive 実行後の「待機状態」: key = UserId
     private static readonly Dictionary<ulong, PendingRoleGive> Pending = new();
 
     public RoleModule(DataService data, DiscordSocketClient client)
     {
         _data = data;
         _client = client;
-        // イベント登録は Program.cs で行う
     }
 
-    // /rolegive
     [SlashCommand("rolegive", "リアクションでロール付与/はく奪する設定を開始します")]
     public async Task RoleGiveAsync(
         [Summary("role", "付与するロール")] IRole role)
@@ -45,7 +42,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             ephemeral: true);
     }
 
-    // /rolegive_list
     [SlashCommand("rolegive_list", "rolegiveで登録した内容を一覧にする")]
     public async Task RoleGiveListAsync()
     {
@@ -73,7 +69,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         await RespondAsync(embed: embed.Build(), ephemeral: true);
     }
 
-    // リアクション追加
     public async Task OnReactionAdded(
         Cacheable<IUserMessage, ulong> cache,
         Cacheable<IMessageChannel, ulong> ch,
@@ -81,11 +76,9 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     {
         if (reaction.UserId == _client.CurrentUser.Id) return;
 
-        // ch.Value が null の場合がある → 安全に取得
         var channel = ch.Value as SocketTextChannel;
         if (channel == null) return;
 
-        // ① rolegive 実行直後の「最初のリアクション」チェック
         if (Pending.TryGetValue(reaction.UserId, out var pending))
         {
             if (pending.GuildId == channel.Guild.Id && pending.ChannelId == channel.Id)
@@ -102,7 +95,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
                 await _data.AddRoleGiveAsync(entry);
 
-                // null の可能性があるため安全に処理
                 var msg = await cache.GetOrDownloadAsync();
                 if (msg != null)
                 {
@@ -114,14 +106,13 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             }
         }
 
-        // ② 通常の rolegive ロジック（ロール付与）
         var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
         if (rg == null) return;
 
         if (reaction.Emote.ToString() != rg.Emoji) return;
 
-        // SocketGuild.GetUserAsync は存在しない → IGuild 経由で REST API を使う
-        var user = await (channel.Guild as IGuild).GetUserAsync(reaction.UserId);
+        // 🔥 Discord.Net v3 では GetUserAsync が無い → GetUser() を使う
+        var user = channel.Guild.GetUser(reaction.UserId);
         if (user == null) return;
 
         var role = channel.Guild.GetRole(rg.RoleId);
@@ -129,7 +120,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             await user.AddRoleAsync(role);
     }
 
-    // リアクション削除 → ロールはく奪
     public async Task OnReactionRemoved(
         Cacheable<IUserMessage, ulong> cache,
         Cacheable<IMessageChannel, ulong> ch,
@@ -145,8 +135,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
         if (reaction.Emote.ToString() != rg.Emoji) return;
 
-        // ここも REST API で取得
-        var user = await (channel.Guild as IGuild).GetUserAsync(reaction.UserId);
+        var user = channel.Guild.GetUser(reaction.UserId);
         if (user == null) return;
 
         var role = channel.Guild.GetRole(rg.RoleId);
