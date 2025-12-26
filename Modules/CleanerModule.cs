@@ -50,3 +50,47 @@ public enum ProtectMode
     Reaction,
     Both
 }
+
+namespace DiscordTimeSignal.Modules;
+
+[Group("deleteago_list", "deleteagoで登録した内容を一覧表示")]
+public class CleanerListModule : InteractionModuleBase<SocketInteractionContext>
+{
+    private readonly DataService _data;
+
+    public CleanerListModule(DataService data)
+    {
+        _data = data;
+    }
+
+    [SlashCommand("show", "現在のdeleteago設定を一覧表示")]
+    public async Task ShowAsync()
+    {
+        var entries = await _data.GetDeleteAgoAsync(Context.Guild.Id, Context.Channel.Id);
+        var list = entries.ToList();
+
+        if (list.Count == 0)
+        {
+            await RespondAsync("このチャンネルには deleteago の設定がありません。", ephemeral: true);
+            return;
+        }
+
+        var embed = new EmbedBuilder()
+            .WithTitle("deleteago 設定一覧")
+            .WithColor(Color.Blue);
+
+        foreach (var e in list)
+        {
+            embed.AddField(
+                $"ID: {e.Id}",
+                $"日数: **{e.Days}日**\n保護: `{e.ProtectMode}`",
+                inline: false);
+        }
+
+        await RespondAsync(embed: embed.Build(), ephemeral: true);
+    }
+
+    // 削除・編集ボタンは Component Interaction で作りこめるが、
+    // ここでは設計・構造優先のため一覧表示までを実装。
+}
+
