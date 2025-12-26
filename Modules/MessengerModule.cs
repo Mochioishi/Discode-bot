@@ -30,7 +30,7 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
                 var embed = new EmbedBuilder()
                     .WithTitle(string.IsNullOrWhiteSpace(title) ? null : title)
                     .WithDescription(text)
-                    .WithColor(Color.Blue) 
+                    .WithColor(Color.Blue)
                     .Build();
 
                 await Context.Channel.SendMessageAsync(embed: embed);
@@ -53,7 +53,6 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
 
         var entry = new BotTextEntry
         {
-            Id = 0,
             GuildId = Context.Guild.Id,
             ChannelId = Context.Channel.Id,
             Content = text,
@@ -74,27 +73,49 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("bottext_list", "bottextで登録した内容を一覧にする")]
     public async Task BotTextListAsync()
     {
-        var entries = await _data.GetBotTextsAsync(Context.Guild.Id, Context.Channel.Id);
+        // ★ ギルド全体の予約を取得
+        var entries = await _data.GetBotTextsByGuildAsync(Context.Guild.Id);
         var list = entries.ToList();
 
         if (list.Count == 0)
         {
-            await RespondAsync("このチャンネルには予約メッセージがありません。", ephemeral: true);
+            await RespondAsync("このサーバーには予約メッセージがありません。", ephemeral: true);
             return;
         }
 
         var embed = new EmbedBuilder()
-            .WithTitle("bottext 予約一覧")
-            .WithColor(Color.Orange);
+            .WithTitle("📝 bottext 予約一覧（全チャンネル）")
+            .WithColor(Color.Blue);
+
+        var components = new ComponentBuilder();
 
         foreach (var e in list)
         {
             embed.AddField(
                 $"ID: {e.Id}",
-                $"時間: `{e.TimeHhmm}` / 埋め込み: `{e.IsEmbed}`\n内容: {e.Content}",
-                inline: false);
+                $"チャンネル: <#{e.ChannelId}>\n" +
+                $"時間: `{e.TimeHhmm}`\n" +
+                $"埋め込み: `{e.IsEmbed}`\n" +
+                $"内容: {e.Content}",
+                inline: false
+            );
+
+            components.WithButton(
+                $"削除 {e.Id}",
+                $"delete_bottext_{e.Id}",
+                ButtonStyle.Danger
+            );
         }
 
-        await RespondAsync(embed: embed.Build(), ephemeral: true);
+        await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
+    }
+
+    // ★ 削除ボタン
+    [ComponentInteraction("delete_bottext_*")]
+    public async Task DeleteBotTextAsync(string id)
+    {
+        long entryId = long.Parse(id);
+        await _data.DeleteBotTextAsync(entryId);
+        await RespondAsync($"ID {entryId} を削除しました。", ephemeral: true);
     }
 }
