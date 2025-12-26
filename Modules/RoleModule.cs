@@ -123,7 +123,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
                         ChannelId = pending.ChannelId,
                         MessageId = reaction.MessageId,
                         RoleId = pending.RoleId,
-                        Emoji = reaction.Emote.Name
+                        Emoji = reaction.Emote.ToString()   // ← 修正
                     };
 
                     await _data.AddRoleGiveAsync(entry);
@@ -153,7 +153,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
             if (rg == null) return;
 
-            if (reaction.Emote.Name != rg.Emoji) return;
+            if (reaction.Emote.ToString() != rg.Emoji) return;   // ← 修正
 
             var user = channel.Guild.GetUser(reaction.UserId);
             if (user == null) return;
@@ -187,7 +187,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
             if (rg == null) return;
 
-            if (reaction.Emote.Name != rg.Emoji) return;
+            if (reaction.Emote.ToString() != rg.Emoji) return;   // ← 修正
 
             var user = channel.Guild.GetUser(reaction.UserId);
             if (user == null) return;
