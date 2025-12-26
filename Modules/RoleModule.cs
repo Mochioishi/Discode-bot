@@ -66,7 +66,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         {
             embed.AddField(
                 $"ID: {e.Id}",
-                $"メッセージ: `{e.MessageId}` / ロール: <@&{e.RoleId}> / 絵文字: `{e.Emoji}`",
+                $"メッセージ: `{e.MessageId}`\nロール: <@&{e.RoleId}>\n絵文字: `{e.Emoji}`",
                 inline: false);
         }
 
@@ -81,6 +81,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     {
         if (reaction.UserId == _client.CurrentUser.Id) return;
 
+        // 🔥 ch.Value が null の場合がある → 安全に取得
         var channel = ch.Value as SocketTextChannel;
         if (channel == null) return;
 
@@ -101,8 +102,12 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
                 await _data.AddRoleGiveAsync(entry);
 
+                // 🔥 null の可能性があるため安全に処理
                 var msg = await cache.GetOrDownloadAsync();
-                await msg.AddReactionAsync(reaction.Emote);
+                if (msg != null)
+                {
+                    await msg.AddReactionAsync(reaction.Emote);
+                }
 
                 Pending.Remove(reaction.UserId);
                 return;
