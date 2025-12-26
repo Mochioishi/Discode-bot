@@ -7,9 +7,7 @@ namespace DiscordTimeSignal.Workers;
 public class TimeSignalWorker : BackgroundService
 {
     private readonly DiscordSocketClient _client;
-
-    // 固定チャンネルID
-    private const ulong TARGET_CHANNEL_ID = 123456789012345678; // ← ここを書き換える
+    private readonly ulong _targetChannelId;
 
     // 平日のみ
     private static readonly DayOfWeek[] Weekdays =
@@ -32,10 +30,25 @@ public class TimeSignalWorker : BackgroundService
     public TimeSignalWorker(DiscordSocketClient client)
     {
         _client = client;
+
+        // Railway の環境変数から読み込む
+        var env = Environment.GetEnvironmentVariable("ALARM_CHANNEL_ID");
+
+        if (!ulong.TryParse(env, out _targetChannelId))
+        {
+            Console.WriteLine("[TimeSignalWorker] ERROR: ALARM_CHANNEL_ID が不正です。");
+            _targetChannelId = 0;
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Bot が完全にログインするまで待つ
+        while (_client.LoginState != LoginState.LoggedIn)
+            await Task.Delay(1000, stoppingToken);
+
+        Console.WriteLine("[TimeSignalWorker] Started");
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -53,7 +66,7 @@ public class TimeSignalWorker : BackgroundService
 
     private async Task CheckAndSendAlarms()
     {
-        if (_client.LoginState != Discord.LoginState.LoggedIn)
+        if (_targetChannelId == 0)
             return;
 
         var now = DateTime.Now;
@@ -66,15 +79,19 @@ public class TimeSignalWorker : BackgroundService
 
         foreach (var alarm in AlarmTimes)
         {
-            // 時刻が一致した瞬間だけ送信（秒まで一致）
             if (nowTime.Hour == alarm.Hour &&
                 nowTime.Minute == alarm.Minute &&
                 now.Second == 0)
             {
-                var channel = _client.GetChannel(TARGET_CHANNEL_ID) as IMessageChannel;
+                var channel = _client.GetChannel(_targetChannelId) as IMessageChannel;
                 if (channel != null)
                 {
                     await channel.SendMessageAsync("🔆 アラーム！");
+                    Console.WriteLine($"[TimeSignalWorker] Sent alarm at {nowTime}");
+                }
+                else
+                {
+                    Console.WriteLine("[TimeSignalWorker] ERROR: チャンネルが見つかりません");
                 }
             }
         }
