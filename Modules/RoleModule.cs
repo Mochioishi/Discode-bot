@@ -58,7 +58,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         var embed = new EmbedBuilder()
-            .WithTitle("🎭 rolegive 設定一覧（全チャンネル）")
+            .WithTitle("🎭 rolegive 設定一覧")
             .WithColor(Color.Blue);
 
         var components = new ComponentBuilder();
@@ -68,8 +68,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             embed.AddField(
                 $"ID: {e.Id}",
                 $"チャンネル: <#{e.ChannelId}>\n" +
-                $"メッセージ: `{e.MessageId}`\n" +
-                $"ロール: <@&{e.RoleId}>\n" +
+                $"ロール: <@&{e.RoleId}>" +
                 $"絵文字: `{e.Emoji}`",
                 inline: false);
 
