@@ -17,9 +17,9 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("bottext", "実行したチャンネルでbotを喋らせる")]
     public async Task BotTextAsync(
         [Summary("text", "送信するテキスト")] string text,
-        [Summary("time", "hh:mm形式の時間（省略時は即時送信）")] string? timeHhmm = null,
         [Summary("embed", "埋め込み形式で送信するか")] bool isEmbed = false,
-        [Summary("title", "埋め込みタイトル（省略可）")] string? title = null)
+        [Summary("title", "埋め込みタイトル（省略可）")] string? title = null),        
+        [Summary("time", "hh:mm形式の時間（省略時は即時送信）")] string? timeHhmm = null
     {
         // time 未指定 → 即時送信
         if (string.IsNullOrWhiteSpace(timeHhmm))
@@ -29,7 +29,6 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
                 var embed = new EmbedBuilder()
                     .WithTitle(string.IsNullOrWhiteSpace(title) ? null : title)
                     .WithDescription(text)
-                    .WithColor(Color.Orange)
                     .Build();
 
                 await Context.Channel.SendMessageAsync(embed: embed);
@@ -39,7 +38,7 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
                 await Context.Channel.SendMessageAsync(text);
             }
 
-            await RespondAsync("メッセージを即時送信しました。", ephemeral: true);
+            await RespondAsync("メッセージを送信しました。", ephemeral: true);
             return;
         }
 
