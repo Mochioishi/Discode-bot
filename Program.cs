@@ -5,6 +5,7 @@ using DiscordTimeSignal.Data;
 using DiscordTimeSignal.Handlers;
 using DiscordTimeSignal.Workers;
 using DiscordTimeSignal.Modules;
+using DiscordTimeSignal.Modules.Game.Prsk;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,20 +31,25 @@ builder.Services.AddSingleton<InteractionService>();
 builder.Services.AddSingleton<InteractionHandler>();
 builder.Services.AddSingleton<DataService>();
 
-// RoleModule を DI に登録
+// Modules
 builder.Services.AddSingleton<RoleModule>();
+builder.Services.AddSingleton<PrskRoomIdModule>();
 
+// Worker
 builder.Services.AddHostedService<TimeSignalWorker>();
 
 var app = builder.Build();
 
-// ★★★ ここで DataService を取り出してテーブル自動生成 ★★★
+// ★★★ DB テーブル自動生成 ★★★
 var dataService = app.Services.GetRequiredService<DataService>();
-await dataService.EnsureTablesAsync();   // ← Railway でも確実にテーブルが作られる
+await dataService.EnsureTablesAsync();
 
 var client = app.Services.GetRequiredService<DiscordSocketClient>();
 var handler = app.Services.GetRequiredService<InteractionHandler>();
+
+// Modules
 var roleModule = app.Services.GetRequiredService<RoleModule>();
+var prskModule = app.Services.GetRequiredService<PrskRoomIdModule>();
 
 // ログ
 client.Log += msg =>
@@ -55,16 +61,12 @@ client.Log += msg =>
 // InteractionService 初期化
 await handler.InitializeAsync();
 
-// ReactionAdded / ReactionRemoved をここで登録
-client.ReactionAdded += async (cache, ch, reaction) =>
-{
-    await roleModule.OnReactionAdded(cache, ch, reaction);
-};
+// ReactionAdded / ReactionRemoved
+client.ReactionAdded += roleModule.OnReactionAdded;
+client.ReactionRemoved += roleModule.OnReactionRemoved;
 
-client.ReactionRemoved += async (cache, ch, reaction) =>
-{
-    await roleModule.OnReactionRemoved(cache, ch, reaction);
-};
+// ★★★ roomid の MessageReceived を登録 ★★★
+client.MessageReceived += prskModule.OnMessageReceived;
 
 // Bot 起動
 var token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
