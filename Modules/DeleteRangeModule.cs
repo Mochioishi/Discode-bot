@@ -17,7 +17,7 @@ public class DeleteRangeModule : InteractionModuleBase<SocketInteractionContext>
 
         await RespondAsync(
             $"開始位置をメッセージID `{message.Id}` に設定しました。\n" +
-            $"終了位置を指定するには、削除範囲の最後のメッセージで `Delete_Range_End` を実行してください。",
+            $"削除範囲の最後のメッセージで `Delete_Range_End` を実行してください。",
             ephemeral: true);
     }
 
@@ -55,7 +55,7 @@ public class DeleteRangeModule : InteractionModuleBase<SocketInteractionContext>
             }
             catch
             {
-                // 権限不足など
+                // 権限不足などは無視
             }
         }
 
