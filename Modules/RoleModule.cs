@@ -24,7 +24,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     {
         _data = data;
         _client = client;
-        // ※ イベント登録は Program.cs で行うためここでは何もしない
+        // イベント登録は Program.cs で行う
     }
 
     // /rolegive
@@ -81,7 +81,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     {
         if (reaction.UserId == _client.CurrentUser.Id) return;
 
-        // 🔥 ch.Value が null の場合がある → 安全に取得
+        // ch.Value が null の場合がある → 安全に取得
         var channel = ch.Value as SocketTextChannel;
         if (channel == null) return;
 
@@ -102,7 +102,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
                 await _data.AddRoleGiveAsync(entry);
 
-                // 🔥 null の可能性があるため安全に処理
+                // null の可能性があるため安全に処理
                 var msg = await cache.GetOrDownloadAsync();
                 if (msg != null)
                 {
@@ -120,8 +120,8 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
         if (reaction.Emote.ToString() != rg.Emoji) return;
 
-        // 🔥 Guild.GetUser() は null の可能性 → API から取得する
-        var user = await channel.Guild.GetUserAsync(reaction.UserId);
+        // SocketGuild.GetUserAsync は存在しない → IGuild 経由で REST API を使う
+        var user = await (channel.Guild as IGuild).GetUserAsync(reaction.UserId);
         if (user == null) return;
 
         var role = channel.Guild.GetRole(rg.RoleId);
@@ -145,8 +145,8 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
         if (reaction.Emote.ToString() != rg.Emoji) return;
 
-        // 🔥 ここも API から取得
-        var user = await channel.Guild.GetUserAsync(reaction.UserId);
+        // ここも REST API で取得
+        var user = await (channel.Guild as IGuild).GetUserAsync(reaction.UserId);
         if (user == null) return;
 
         var role = channel.Guild.GetRole(rg.RoleId);
