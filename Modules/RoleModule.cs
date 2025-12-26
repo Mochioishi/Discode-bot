@@ -69,6 +69,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         await RespondAsync(embed: embed.Build(), ephemeral: true);
     }
 
+    // Program.cs で登録される
     public async Task OnReactionAdded(
         Cacheable<IUserMessage, ulong> cache,
         Cacheable<IMessageChannel, ulong> ch,
@@ -77,9 +78,11 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         try
         {
             if (reaction.UserId == _client.CurrentUser.Id) return;
-            if (!ch.HasValue || ch.Value == null) return;
 
-            var channel = ch.Value as SocketTextChannel;
+            var message = await cache.GetOrDownloadAsync();
+            if (message == null) return;
+
+            var channel = message.Channel as SocketTextChannel;
             if (channel == null) return;
 
             // ① rolegive 実行直後の登録処理
@@ -89,19 +92,16 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
                 {
                     var entry = new RoleGiveEntry
                     {
-                        Id = 0,
                         GuildId = pending.GuildId,
                         ChannelId = pending.ChannelId,
                         MessageId = reaction.MessageId,
                         RoleId = pending.RoleId,
-                        Emoji = reaction.Emote.ToString()
+                        Emoji = reaction.Emote.Name
                     };
 
                     await _data.AddRoleGiveAsync(entry);
 
-                    var msg = await cache.GetOrDownloadAsync();
-                    if (msg != null)
-                        await msg.AddReactionAsync(reaction.Emote);
+                    await message.AddReactionAsync(reaction.Emote);
 
                     Pending.Remove(reaction.UserId);
                     return;
@@ -112,7 +112,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
             if (rg == null) return;
 
-            if (reaction.Emote.ToString() != rg.Emoji) return;
+            if (reaction.Emote.Name != rg.Emoji) return;
 
             var user = channel.Guild.GetUser(reaction.UserId);
             if (user == null) return;
@@ -135,15 +135,17 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         try
         {
             if (reaction.UserId == _client.CurrentUser.Id) return;
-            if (!ch.HasValue || ch.Value == null) return;
 
-            var channel = ch.Value as SocketTextChannel;
+            var message = await cache.GetOrDownloadAsync();
+            if (message == null) return;
+
+            var channel = message.Channel as SocketTextChannel;
             if (channel == null) return;
 
             var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
             if (rg == null) return;
 
-            if (reaction.Emote.ToString() != rg.Emoji) return;
+            if (reaction.Emote.Name != rg.Emoji) return;
 
             var user = channel.Guild.GetUser(reaction.UserId);
             if (user == null) return;
