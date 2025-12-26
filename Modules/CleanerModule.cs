@@ -35,7 +35,6 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
 
         var entry = new DeleteAgoEntry
         {
-            Id = 0,
             GuildId = Context.Guild.Id,
             ChannelId = Context.Channel.Id,
             Days = days,
@@ -54,8 +53,11 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("deleteago_list", "deleteagoで登録した内容を一覧表示")]
     public async Task DeleteAgoListAsync()
     {
-        var entries = await _data.GetAllDeleteAgoAsync(Context.Guild.Id, Context.Channel.Id);
-        var list = entries.ToList();
+        // ★ 修正：引数なしで呼ぶ
+        var entries = await _data.GetAllDeleteAgoAsync();
+        var list = entries
+            .Where(e => e.GuildId == Context.Guild.Id && e.ChannelId == Context.Channel.Id)
+            .ToList();
 
         if (list.Count == 0)
         {
