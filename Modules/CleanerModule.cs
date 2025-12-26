@@ -50,7 +50,7 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
             ephemeral: true);
     }
 
-    // /deleteago_list
+    // /deleteago_list（UI 連番対応）
     [SlashCommand("deleteago_list", "deleteagoで登録した内容を一覧表示")]
     public async Task DeleteAgoListAsync()
     {
@@ -71,18 +71,22 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
 
         var components = new ComponentBuilder();
 
+        int index = 1;
+
         foreach (var e in list)
         {
             embed.AddField(
-                $"ID: {e.Id}",
+                $"No.{index}",
                 $"チャンネル: <#{e.ChannelId}>\n" +
                 $"日数: **{e.Days}日**\n" +
                 $"保護対象: `{e.ProtectMode}`",
                 inline: false
             );
 
-            components.WithButton($"削除 {e.Id}", $"delete_deleteago_{e.Id}", ButtonStyle.Danger);
-            components.WithButton($"編集 {e.Id}", $"edit_deleteago_{e.Id}", ButtonStyle.Primary);
+            components.WithButton($"削除 No.{index}", $"delete_deleteago_{e.Id}", ButtonStyle.Danger);
+            components.WithButton($"編集 No.{index}", $"edit_deleteago_{e.Id}", ButtonStyle.Primary);
+
+            index++;
         }
 
         await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
