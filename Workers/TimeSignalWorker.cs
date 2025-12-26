@@ -1,6 +1,4 @@
-using Discord;
 using Discord.WebSocket;
-using DiscordTimeSignal.Data;
 using Microsoft.Extensions.Hosting;
 
 namespace DiscordTimeSignal.Workers;
@@ -8,87 +6,76 @@ namespace DiscordTimeSignal.Workers;
 public class TimeSignalWorker : BackgroundService
 {
     private readonly DiscordSocketClient _client;
-    private readonly DataService _data;
 
-    public TimeSignalWorker(DiscordSocketClient client, DataService data)
+    // 固定チャンネルID
+    private const ulong TARGET_CHANNEL_ID = 123456789012345678; // ← ここを書き換える
+
+    // 平日のみ
+    private static readonly DayOfWeek[] Weekdays =
+    {
+        DayOfWeek.Monday,
+        DayOfWeek.Tuesday,
+        DayOfWeek.Wednesday,
+        DayOfWeek.Thursday,
+        DayOfWeek.Friday
+    };
+
+    // アラーム時刻
+    private static readonly TimeOnly[] AlarmTimes =
+    {
+        new TimeOnly(8, 28),
+        new TimeOnly(12, 55),
+        new TimeOnly(17, 55)
+    };
+
+    public TimeSignalWorker(DiscordSocketClient client)
     {
         _client = client;
-        _data = data;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var nowJst = DateTime.UtcNow.AddHours(9);
-            var hhmm = nowJst.ToString("HH:mm");
-
-            // bottext 実行
-            await RunBotTextAsync(hhmm);
-
-            // deleteago は午前4時だけ
-            if (hhmm == "04:00")
+            try
             {
-                await RunDeleteAgoAsync();
+                await CheckAndSendAlarms();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TimeSignalWorker ERROR] {ex}");
             }
 
-            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            await Task.Delay(1000, stoppingToken); // 1秒ごとにチェック
         }
     }
 
-    private async Task RunBotTextAsync(string hhmm)
+    private async Task CheckAndSendAlarms()
     {
-        // 全ギルド・全チャンネルを走査する設計にしていないので、
-        // bottext には "time_hhmm" で絞り込む SQL を DataService に追加してもOK。
-        // ここでは簡略的に全件取得パターンは省略し、
-        // 必要なら DataService に専用メソッドを追加する形を想定。
-    }
+        if (_client.LoginState != Discord.LoginState.LoggedIn)
+            return;
 
-    private async Task RunDeleteAgoAsync()
-    {
-        var entries = await _data.GetAllDeleteAgoAsync();
+        var now = DateTime.Now;
 
-        foreach (var entry in entries)
+        // 平日以外は無視
+        if (!Weekdays.Contains(now.DayOfWeek))
+            return;
+
+        var nowTime = TimeOnly.FromDateTime(now);
+
+        foreach (var alarm in AlarmTimes)
         {
-            var guild = _client.GetGuild(entry.GuildId);
-            if (guild == null) continue;
-            var channel = guild.GetTextChannel(entry.ChannelId);
-            if (channel == null) continue;
-
-            var cutoff = DateTimeOffset.UtcNow.AddDays(-entry.Days);
-
-            var messages = await channel.GetMessagesAsync(limit: 1000).FlattenAsync();
-
-            foreach (var msg in messages)
+            // 時刻が一致した瞬間だけ送信（秒まで一致）
+            if (nowTime.Hour == alarm.Hour &&
+                nowTime.Minute == alarm.Minute &&
+                now.Second == 0)
             {
-                if (msg.Timestamp >= cutoff) continue;
-
-                if (!ShouldDeleteMessage(msg, entry.ProtectMode))
-                    continue;
-
-                try
+                var channel = _client.GetChannel(TARGET_CHANNEL_ID) as IMessageChannel;
+                if (channel != null)
                 {
-                    await msg.DeleteAsync();
-                }
-                catch
-                {
-                    // ログだけ出すならここ
+                    await channel.SendMessageAsync("🔆 アラーム！");
                 }
             }
         }
-    }
-
-    private bool ShouldDeleteMessage(IMessage msg, string mode)
-    {
-        var hasImage = msg.Attachments.Any(a => a.ContentType?.StartsWith("image/") == true);
-        var hasReaction = msg.Reactions?.Count > 0;
-
-        return mode switch
-        {
-            "image" => !hasImage,
-            "reaction" => !hasReaction,
-            "both" => !(hasImage || hasReaction),
-            _ => true
-        };
     }
 }
