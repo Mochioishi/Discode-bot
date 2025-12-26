@@ -18,8 +18,9 @@ public class MessengerModule : InteractionModuleBase<SocketInteractionContext>
     public async Task BotTextAsync(
         [Summary("text", "送信するテキスト")] string text,
         [Summary("embed", "埋め込み形式で送信するか")] bool isEmbed = false,
-        [Summary("title", "埋め込みタイトル（省略可）")] string? title = null),        
-        [Summary("time", "hh:mm形式の時間に予約（省略可）")] string? timeHhmm = null)
+        [Summary("title", "埋め込みタイトル（省略可）")] string? title = null,
+        [Summary("time", "hh:mm形式の時間に予約（省略可）")] string? timeHhmm = null
+    )
     {
         // time 未指定 → 即時送信
         if (string.IsNullOrWhiteSpace(timeHhmm))
