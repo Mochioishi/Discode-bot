@@ -74,52 +74,59 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         Cacheable<IMessageChannel, ulong> ch,
         SocketReaction reaction)
     {
-        if (reaction.UserId == _client.CurrentUser.Id) return;
-
-        // 🔥 最重要：ch.Value に触れる前に HasValue を確認
-        if (!ch.HasValue) return;
-
-        var channel = ch.Value as SocketTextChannel;
-        if (channel == null) return;
-
-        // ① rolegive 実行直後の登録処理
-        if (Pending.TryGetValue(reaction.UserId, out var pending))
+        try
         {
-            if (pending.GuildId == channel.Guild.Id && pending.ChannelId == channel.Id)
+            if (reaction.UserId == _client.CurrentUser.Id) return;
+
+            // 🔥 ch.HasValue だけでは不十分 → ch.Value も null チェック
+            if (!ch.HasValue || ch.Value == null) return;
+
+            var channel = ch.Value as SocketTextChannel;
+            if (channel == null) return;
+
+            // ① rolegive 実行直後の登録処理
+            if (Pending.TryGetValue(reaction.UserId, out var pending))
             {
-                var entry = new RoleGiveEntry
+                if (pending.GuildId == channel.Guild.Id && pending.ChannelId == channel.Id)
                 {
-                    Id = 0,
-                    GuildId = pending.GuildId,
-                    ChannelId = pending.ChannelId,
-                    MessageId = reaction.MessageId,
-                    RoleId = pending.RoleId,
-                    Emoji = reaction.Emote.ToString()
-                };
+                    var entry = new RoleGiveEntry
+                    {
+                        Id = 0,
+                        GuildId = pending.GuildId,
+                        ChannelId = pending.ChannelId,
+                        MessageId = reaction.MessageId,
+                        RoleId = pending.RoleId,
+                        Emoji = reaction.Emote.ToString()
+                    };
 
-                await _data.AddRoleGiveAsync(entry);
+                    await _data.AddRoleGiveAsync(entry);
 
-                var msg = await cache.GetOrDownloadAsync();
-                if (msg != null)
-                    await msg.AddReactionAsync(reaction.Emote);
+                    var msg = await cache.GetOrDownloadAsync();
+                    if (msg != null)
+                        await msg.AddReactionAsync(reaction.Emote);
 
-                Pending.Remove(reaction.UserId);
-                return;
+                    Pending.Remove(reaction.UserId);
+                    return;
+                }
             }
+
+            // ② 通常のロール付与処理
+            var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
+            if (rg == null) return;
+
+            if (reaction.Emote.ToString() != rg.Emoji) return;
+
+            var user = channel.Guild.GetUser(reaction.UserId);
+            if (user == null) return;
+
+            var role = channel.Guild.GetRole(rg.RoleId);
+            if (role != null)
+                await user.AddRoleAsync(role);
         }
-
-        // ② 通常のロール付与処理
-        var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
-        if (rg == null) return;
-
-        if (reaction.Emote.ToString() != rg.Emoji) return;
-
-        var user = channel.Guild.GetUser(reaction.UserId);
-        if (user == null) return;
-
-        var role = channel.Guild.GetRole(rg.RoleId);
-        if (role != null)
-            await user.AddRoleAsync(role);
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ReactionAdded ERROR] {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     public async Task OnReactionRemoved(
@@ -127,24 +134,31 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         Cacheable<IMessageChannel, ulong> ch,
         SocketReaction reaction)
     {
-        if (reaction.UserId == _client.CurrentUser.Id) return;
+        try
+        {
+            if (reaction.UserId == _client.CurrentUser.Id) return;
 
-        // 🔥 最重要：ch.Value に触れる前に HasValue を確認
-        if (!ch.HasValue) return;
+            // 🔥 ch.HasValue だけでは不十分 → ch.Value も null チェック
+            if (!ch.HasValue || ch.Value == null) return;
 
-        var channel = ch.Value as SocketTextChannel;
-        if (channel == null) return;
+            var channel = ch.Value as SocketTextChannel;
+            if (channel == null) return;
 
-        var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
-        if (rg == null) return;
+            var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
+            if (rg == null) return;
 
-        if (reaction.Emote.ToString() != rg.Emoji) return;
+            if (reaction.Emote.ToString() != rg.Emoji) return;
 
-        var user = channel.Guild.GetUser(reaction.UserId);
-        if (user == null) return;
+            var user = channel.Guild.GetUser(reaction.UserId);
+            if (user == null) return;
 
-        var role = channel.Guild.GetRole(rg.RoleId);
-        if (role != null)
-            await user.RemoveRoleAsync(role);
+            var role = channel.Guild.GetRole(rg.RoleId);
+            if (role != null)
+                await user.RemoveRoleAsync(role);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ReactionRemoved ERROR] {ex.GetType().Name}: {ex.Message}");
+        }
     }
 }
