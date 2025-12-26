@@ -4,10 +4,14 @@ using DiscordTimeSignal.Data;
 
 namespace DiscordTimeSignal.Modules;
 
-//
-// deleteago 設定コマンド
-//
-[Group("deleteago", "一定期間過ぎたメッセージを自動削除する設定")]
+public enum ProtectMode
+{
+    None,
+    Image,
+    Reaction,
+    Both
+}
+
 public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly DataService _data;
@@ -17,8 +21,9 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
         _data = data;
     }
 
-    [SlashCommand("set", "実行したチャンネルでX日経過したメッセージを自動削除")]
-    public async Task SetAsync(
+    // /deleteago
+    [SlashCommand("deleteago", "一定期間過ぎたメッセージを自動削除する設定")]
+    public async Task DeleteAgoAsync(
         [Summary("days", "何日前より前を削除するか")] int days,
         [Summary("protect", "保護対象")] ProtectMode protect = ProtectMode.None)
     {
@@ -44,31 +49,10 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
             $"保護対象: `{protect}`",
             ephemeral: true);
     }
-}
 
-public enum ProtectMode
-{
-    None,
-    Image,
-    Reaction,
-    Both
-}
-
-//
-// deleteago 一覧コマンド
-//
-[Group("deleteago_list", "deleteagoで登録した内容を一覧表示")]
-public class CleanerListModule : InteractionModuleBase<SocketInteractionContext>
-{
-    private readonly DataService _data;
-
-    public CleanerListModule(DataService data)
-    {
-        _data = data;
-    }
-
-    [SlashCommand("show", "現在のdeleteago設定を一覧表示")]
-    public async Task ShowAsync()
+    // /deleteago_list
+    [SlashCommand("deleteago_list", "deleteagoで登録した内容を一覧表示")]
+    public async Task DeleteAgoListAsync()
     {
         var entries = await _data.GetDeleteAgoAsync(Context.Guild.Id, Context.Channel.Id);
         var list = entries.ToList();
