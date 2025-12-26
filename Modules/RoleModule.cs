@@ -24,9 +24,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     {
         _data = data;
         _client = client;
-
-        _client.ReactionAdded += OnReactionAdded;
-        _client.ReactionRemoved += OnReactionRemoved;
     }
 
     // /rolegive
@@ -76,7 +73,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     }
 
     // リアクション追加
-    private async Task OnReactionAdded(
+    public async Task OnReactionAdded(
         Cacheable<IUserMessage, ulong> cache,
         Cacheable<IMessageChannel, ulong> ch,
         SocketReaction reaction)
@@ -89,7 +86,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         {
             if (pending.GuildId == channel.Guild.Id && pending.ChannelId == channel.Id)
             {
-                // このメッセージと絵文字を対象として登録
                 var entry = new RoleGiveEntry
                 {
                     Id = 0,
@@ -102,7 +98,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
                 await _data.AddRoleGiveAsync(entry);
 
-                // Bot が対象メッセージに同じリアクションを付ける
                 var msg = await cache.GetOrDownloadAsync();
                 await msg.AddReactionAsync(reaction.Emote);
 
@@ -126,7 +121,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     }
 
     // リアクション削除 → ロールはく奪
-    private async Task OnReactionRemoved(
+    public async Task OnReactionRemoved(
         Cacheable<IUserMessage, ulong> cache,
         Cacheable<IMessageChannel, ulong> ch,
         SocketReaction reaction)
