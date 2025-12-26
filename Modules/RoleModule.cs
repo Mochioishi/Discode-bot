@@ -37,8 +37,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         // ① このチャンネルの既存メッセージにリアクションしてもらう方式
         var notice = await RespondAsync(
             $"ロール {role.Mention} を設定します。\n" +
-            $"このチャンネル内の **既存のメッセージ** に、使いたい絵文字でリアクションしてください。\n" +
-            $"リアクション後に、このメッセージが「設定完了」に変わります。",
+            $"メッセージにリアクションしてください。\n" ,
             ephemeral: true);
 
         Pending[Context.User.Id] = new PendingRoleGive
