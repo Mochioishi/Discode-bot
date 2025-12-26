@@ -2,70 +2,148 @@ using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
 using DiscordTimeSignal.Data;
-using DiscordTimeSignal.Handlers;
-using DiscordTimeSignal.Workers;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
-var builder = WebApplication.CreateBuilder(args);
+namespace DiscordTimeSignal.Modules;
 
-builder.Configuration
-    .AddJsonFile("appsettings.json", optional: true)
-    .AddEnvironmentVariables();
-
-// Discord client
-builder.Services.AddSingleton(new DiscordSocketClient(new DiscordSocketConfig
+public class PendingRoleGive
 {
-    GatewayIntents =
-        GatewayIntents.AllUnprivileged |
-        GatewayIntents.MessageContent |
-        GatewayIntents.GuildMembers |
-        GatewayIntents.GuildMessageReactions
-}));
+    public ulong GuildId { get; set; }
+    public ulong ChannelId { get; set; }
+    public ulong RoleId { get; set; }
+}
 
-builder.Services.AddSingleton<InteractionService>();
-builder.Services.AddSingleton<InteractionHandler>();
-builder.Services.AddSingleton<DataService>();
-
-// RoleModule を DI に登録（イベント呼び出しに必要）
-builder.Services.AddSingleton<RoleModule>();
-
-builder.Services.AddHostedService<TimeSignalWorker>();
-
-var app = builder.Build();
-
-var client = app.Services.GetRequiredService<DiscordSocketClient>();
-var handler = app.Services.GetRequiredService<InteractionHandler>();
-var roleModule = app.Services.GetRequiredService<RoleModule>();
-
-// ログ
-client.Log += msg =>
+public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 {
-    Console.WriteLine($"{msg.Severity} {msg.Source}\t{msg.Message}");
-    return Task.CompletedTask;
-};
+    private readonly DataService _data;
+    private readonly DiscordSocketClient _client;
 
-// InteractionService 初期化
-await handler.InitializeAsync();
+    // /rolegive 実行後の「待機状態」: key = UserId
+    private static readonly Dictionary<ulong, PendingRoleGive> Pending = new();
 
-// 🔥 ReactionAdded / ReactionRemoved をここで登録（最重要）
-client.ReactionAdded += async (cache, ch, reaction) =>
-{
-    await roleModule.OnReactionAdded(cache, ch, reaction);
-};
+    public RoleModule(DataService data, DiscordSocketClient client)
+    {
+        _data = data;
+        _client = client;
 
-client.ReactionRemoved += async (cache, ch, reaction) =>
-{
-    await roleModule.OnReactionRemoved(cache, ch, reaction);
-};
+        _client.ReactionAdded += OnReactionAdded;
+        _client.ReactionRemoved += OnReactionRemoved;
+    }
 
-// Bot 起動
-var token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
-await client.LoginAsync(TokenType.Bot, token);
-await client.StartAsync();
+    // /rolegive
+    [SlashCommand("rolegive", "リアクションでロール付与/はく奪する設定を開始します")]
+    public async Task RoleGiveAsync(
+        [Summary("role", "付与するロール")] IRole role)
+    {
+        Pending[Context.User.Id] = new PendingRoleGive
+        {
+            GuildId = Context.Guild.Id,
+            ChannelId = Context.Channel.Id,
+            RoleId = role.Id
+        };
 
-app.MapGet("/", () => "OK");
+        await RespondAsync(
+            $"ロール {role.Mention} を設定します。\n" +
+            $"対象にしたいメッセージに、使いたい絵文字でリアクションしてください。",
+            ephemeral: true);
+    }
 
-await app.RunAsync();
+    // /rolegive_list
+    [SlashCommand("rolegive_list", "rolegiveで登録した内容を一覧にする")]
+    public async Task RoleGiveListAsync()
+    {
+        var entries = await _data.GetRoleGivesAsync(Context.Guild.Id, Context.Channel.Id);
+        var list = entries.ToList();
+
+        if (list.Count == 0)
+        {
+            await RespondAsync("このチャンネルには rolegive 設定がありません。", ephemeral: true);
+            return;
+        }
+
+        var embed = new EmbedBuilder()
+            .WithTitle("rolegive 設定一覧")
+            .WithColor(Color.Green);
+
+        foreach (var e in list)
+        {
+            embed.AddField(
+                $"ID: {e.Id}",
+                $"メッセージ: `{e.MessageId}` / ロール: `{e.RoleId}` / 絵文字: `{e.Emoji}`",
+                inline: false);
+        }
+
+        await RespondAsync(embed: embed.Build(), ephemeral: true);
+    }
+
+    // リアクション追加
+    private async Task OnReactionAdded(
+        Cacheable<IUserMessage, ulong> cache,
+        Cacheable<IMessageChannel, ulong> ch,
+        SocketReaction reaction)
+    {
+        if (reaction.UserId == _client.CurrentUser.Id) return;
+        if (ch.Value is not SocketTextChannel channel) return;
+
+        // ① rolegive 実行直後の「最初のリアクション」チェック
+        if (Pending.TryGetValue(reaction.UserId, out var pending))
+        {
+            if (pending.GuildId == channel.Guild.Id && pending.ChannelId == channel.Id)
+            {
+                // このメッセージと絵文字を対象として登録
+                var entry = new RoleGiveEntry
+                {
+                    Id = 0,
+                    GuildId = pending.GuildId,
+                    ChannelId = pending.ChannelId,
+                    MessageId = reaction.MessageId,
+                    RoleId = pending.RoleId,
+                    Emoji = reaction.Emote.ToString()
+                };
+
+                await _data.AddRoleGiveAsync(entry);
+
+                // Bot が対象メッセージに同じリアクションを付ける
+                var msg = await cache.GetOrDownloadAsync();
+                await msg.AddReactionAsync(reaction.Emote);
+
+                Pending.Remove(reaction.UserId);
+                return;
+            }
+        }
+
+        // ② 通常の rolegive ロジック（ロール付与）
+        var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
+        if (rg == null) return;
+
+        if (reaction.Emote.ToString() != rg.Emoji) return;
+
+        if (channel.Guild.GetUser(reaction.UserId) is SocketGuildUser user)
+        {
+            var role = channel.Guild.GetRole(rg.RoleId);
+            if (role != null)
+                await user.AddRoleAsync(role);
+        }
+    }
+
+    // リアクション削除 → ロールはく奪
+    private async Task OnReactionRemoved(
+        Cacheable<IUserMessage, ulong> cache,
+        Cacheable<IMessageChannel, ulong> ch,
+        SocketReaction reaction)
+    {
+        if (reaction.UserId == _client.CurrentUser.Id) return;
+        if (ch.Value is not SocketTextChannel channel) return;
+
+        var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
+        if (rg == null) return;
+
+        if (reaction.Emote.ToString() != rg.Emoji) return;
+
+        if (channel.Guild.GetUser(reaction.UserId) is SocketGuildUser user)
+        {
+            var role = channel.Guild.GetRole(rg.RoleId);
+            if (role != null)
+                await user.RemoveRoleAsync(role);
+        }
+    }
+}
