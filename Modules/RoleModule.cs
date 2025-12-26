@@ -25,6 +25,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         _client = client;
     }
 
+    // /rolegive
     [SlashCommand("rolegive", "リアクションでロール付与/はく奪する設定を開始します")]
     public async Task RoleGiveAsync(
         [Summary("role", "付与するロール")] IRole role)
@@ -42,31 +43,53 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             ephemeral: true);
     }
 
+    // /rolegive_list
     [SlashCommand("rolegive_list", "rolegiveで登録した内容を一覧にする")]
     public async Task RoleGiveListAsync()
     {
-        var entries = await _data.GetRoleGivesAsync(Context.Guild.Id, Context.Channel.Id);
+        // ★ ギルド全体の設定を取得
+        var entries = await _data.GetRoleGivesByGuildAsync(Context.Guild.Id);
         var list = entries.ToList();
 
         if (list.Count == 0)
         {
-            await RespondAsync("このチャンネルには rolegive 設定がありません。", ephemeral: true);
+            await RespondAsync("このサーバーには rolegive の設定がありません。", ephemeral: true);
             return;
         }
 
         var embed = new EmbedBuilder()
-            .WithTitle("rolegive 設定一覧")
-            .WithColor(Color.Green);
+            .WithTitle("🎭 rolegive 設定一覧（全チャンネル）")
+            .WithColor(Color.Blue);
+
+        var components = new ComponentBuilder();
 
         foreach (var e in list)
         {
             embed.AddField(
                 $"ID: {e.Id}",
-                $"メッセージ: `{e.MessageId}`\nロール: <@&{e.RoleId}>\n絵文字: `{e.Emoji}`",
+                $"チャンネル: <#{e.ChannelId}>\n" +
+                $"メッセージ: `{e.MessageId}`\n" +
+                $"ロール: <@&{e.RoleId}>\n" +
+                $"絵文字: `{e.Emoji}`",
                 inline: false);
+
+            components.WithButton(
+                $"削除 {e.Id}",
+                $"delete_rolegive_{e.Id}",
+                ButtonStyle.Danger
+            );
         }
 
-        await RespondAsync(embed: embed.Build(), ephemeral: true);
+        await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
+    }
+
+    // ★ 削除ボタン Interaction
+    [ComponentInteraction("delete_rolegive_*")]
+    public async Task DeleteRoleGiveAsync(string id)
+    {
+        long entryId = long.Parse(id);
+        await _data.DeleteRoleGiveAsync(entryId);
+        await RespondAsync($"ID {entryId} を削除しました。", ephemeral: true);
     }
 
     // Program.cs で登録される
@@ -100,7 +123,6 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
                     };
 
                     await _data.AddRoleGiveAsync(entry);
-
                     await message.AddReactionAsync(reaction.Emote);
 
                     Pending.Remove(reaction.UserId);
