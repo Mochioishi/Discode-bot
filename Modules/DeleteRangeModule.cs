@@ -16,7 +16,7 @@ public class DeleteRangeModule : InteractionModuleBase<SocketInteractionContext>
         RangeStart[key] = message.Id;
 
         await RespondAsync(
-            $"開始位置を設定しました",
+            $"開始位置を設定しました。",
             ephemeral: true);
     }
 
@@ -27,7 +27,7 @@ public class DeleteRangeModule : InteractionModuleBase<SocketInteractionContext>
 
         if (!RangeStart.TryGetValue(key, out var startId))
         {
-            await RespondAsync("開始位置が設定されていません。先に `Delete_Range_Start` を実行してください。", ephemeral: true);
+            await RespondAsync("開始位置が設定されていません。先に **範囲削除開始** を実行してください。", ephemeral: true);
             return;
         }
 
@@ -60,6 +60,11 @@ public class DeleteRangeModule : InteractionModuleBase<SocketInteractionContext>
 
         RangeStart.Remove(key);
 
-        await RespondAsync($"メッセージを **{count} 件** 削除しました。", ephemeral: true);
+        // ← これが必要
+        var count = range.Count;
+
+        await RespondAsync(
+            $"メッセージを **{count} 件** 削除しました。",
+            ephemeral: true);
     }
 }
