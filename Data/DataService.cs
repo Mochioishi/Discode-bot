@@ -5,6 +5,7 @@ using Npgsql;
 
 namespace DiscordTimeSignal.Data;
 
+
 public class DataService
 {
     private readonly string _connectionString;
