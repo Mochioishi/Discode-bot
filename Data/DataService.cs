@@ -2,6 +2,21 @@ using Npgsql;
 
 namespace DiscordTimeSignal.Data;
 
+public DataService(IConfiguration config)
+{
+    var host = Environment.GetEnvironmentVariable("PGHOST");
+    var port = Environment.GetEnvironmentVariable("PGPORT");
+    var user = Environment.GetEnvironmentVariable("PGUSER");
+    var pass = Environment.GetEnvironmentVariable("PGPASSWORD");
+    var db   = Environment.GetEnvironmentVariable("PGDATABASE");
+
+    if (string.IsNullOrWhiteSpace(host))
+        throw new Exception("Railway PostgreSQL の環境変数が設定されていません。");
+
+    _connectionString =
+        $"Host={host};Port={port};Username={user};Password={pass};Database={db};SSL Mode=Require;Trust Server Certificate=true";
+}
+
 public class DataService
 {
     private readonly string _connectionString;
