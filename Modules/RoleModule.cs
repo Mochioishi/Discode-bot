@@ -129,8 +129,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
                     await message.AddReactionAsync(reaction.Emote);
 
                     // 設定完了を ephemeral で通知
-                    await channel.SendMessageAsync(
-                        text: null,
+                    await FollowupAsync(
                         embed: new EmbedBuilder()
                             .WithTitle("🎉 rolegive の設定が完了しました！")
                             .WithDescription(
@@ -139,7 +138,8 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
                                 $"この絵文字を付けるとロールが付与され、外すとはく奪されます。")
                             .WithColor(Color.Blue)
                             .Build(),
-                        allowedMentions: AllowedMentions.None);
+                        ephemeral: true
+                    );
 
                     Pending.Remove(reaction.UserId);
                     return;
