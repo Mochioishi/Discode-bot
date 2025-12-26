@@ -1,5 +1,4 @@
 using Npgsql;
-using DiscordTimeSignal.Data.Models;
 
 namespace DiscordTimeSignal.Data;
 
