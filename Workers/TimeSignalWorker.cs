@@ -32,11 +32,11 @@ public class TimeSignalWorker : BackgroundService
         _client = client;
 
         // Railway の環境変数から読み込む
-        var env = Environment.GetEnvironmentVariable("ALARM_CHANNEL_ID");
+        var env = Environment.GetEnvironmentVariable("TARGET_CHANNEL_ID");
 
         if (!ulong.TryParse(env, out _targetChannelId))
         {
-            Console.WriteLine("[TimeSignalWorker] ERROR: ALARM_CHANNEL_ID が不正です。");
+            Console.WriteLine("[TimeSignalWorker] ERROR: TARGET_CHANNEL_ID が不正です。");
             _targetChannelId = 0;
         }
     }
