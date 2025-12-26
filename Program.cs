@@ -25,7 +25,10 @@ builder.Services.AddSingleton(new DiscordSocketClient(new DiscordSocketConfig
         GatewayIntents.GuildMessages |
         GatewayIntents.MessageContent |
         GatewayIntents.GuildMembers |
-        GatewayIntents.GuildMessageReactions
+        GatewayIntents.GuildMessageReactions,
+
+    AlwaysDownloadUsers = true,   // ← ★ これがロール付与に必須
+    LogGatewayIntentWarnings = false
 }));
 
 builder.Services.AddSingleton<InteractionService>();
@@ -59,7 +62,7 @@ client.Log += msg =>
     return Task.CompletedTask;
 };
 
-// InteractionService 初期化（内部で InteractionCreated を登録する）
+// InteractionService 初期化
 await handler.InitializeAsync();
 
 // ReactionAdded / ReactionRemoved
