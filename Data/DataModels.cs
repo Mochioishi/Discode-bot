@@ -1,29 +1,40 @@
-namespace Discord.Data
+namespace DiscordTimeSignal.Data;
+
+public record BotTextEntry
 {
-    public class CleanupSetting {
-        public ulong GuildId { get; set; }
-        public ulong ChannelId { get; set; }
-        public int DaysBefore { get; set; } // 追加
-        public string? ProtectionType { get; set; } // 追加
-    }
+    public long Id { get; init; }
+    public ulong GuildId { get; init; }
+    public ulong ChannelId { get; init; }
+    public string Content { get; init; } = "";
+    public bool IsEmbed { get; init; }
+    public string? EmbedTitle { get; init; }
+    public string TimeHhmm { get; init; } = "00:00";
+}
 
-    public class GameRoomConfig {
-        public ulong GuildId { get; set; }
-        public ulong MonitorChannelId { get; set; }
-        public ulong TargetChannelId { get; set; }
-        public string? OriginalNameFormat { get; set; }
-    }
+public record DeleteAgoEntry
+{
+    public long Id { get; init; }
+    public ulong GuildId { get; init; }
+    public ulong ChannelId { get; init; }
+    public int Days { get; init; }
+    public string ProtectMode { get; init; } = "none";
+}
 
-    public class RoleGiveConfig {
-        public ulong MessageId { get; set; }
-        public ulong RoleId { get; set; }
-        public string? EmojiName { get; set; }
-    }
+public record PrskRoomIdEntry
+{
+    public long Id { get; init; }
+    public ulong GuildId { get; init; }
+    public ulong WatchChannelId { get; init; }
+    public ulong TargetChannelId { get; init; }
+    public string NameFormat { get; init; } = "ex【{roomid}】";
+}
 
-    public class MessageTask {
-        public int Id { get; set; } // MessengerModuleに合わせて int
-        public ulong ChannelId { get; set; }
-        public string? Content { get; set; }
-        public DateTime ScheduledTime { get; set; }
-    }
+public record RoleGiveEntry
+{
+    public long Id { get; init; }
+    public ulong GuildId { get; init; }
+    public ulong ChannelId { get; init; }
+    public ulong MessageId { get; init; }
+    public ulong RoleId { get; init; }
+    public string Emoji { get; init; } = "🐾";
 }
