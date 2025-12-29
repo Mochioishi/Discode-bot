@@ -21,3 +21,6 @@ COPY --from=build /app/out .
 # Botを起動
 # sh -c を使うことで環境変数の展開などがしやすくなる
 ENTRYPOINT ["sh", "-c", "dotnet Discord.dll"]
+
+ENV ConnectionStrings__DefaultConnection="Host=postgres;Port=5432;Database=discord;Username=postgres;Password=xxxx"
+
