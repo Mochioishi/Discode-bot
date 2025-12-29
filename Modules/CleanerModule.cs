@@ -54,12 +54,11 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("deleteago_list", "deleteagoで登録した内容を一覧表示")]
     public async Task DeleteAgoListAsync()
     {
-        var entries = await _data.GetAllDeleteAgoAsync();
-        var list = entries
+        var entries = (await _data.GetAllDeleteAgoAsync())
             .Where(e => e.GuildId == Context.Guild.Id)
             .ToList();
 
-        if (list.Count == 0)
+        if (entries.Count == 0)
         {
             await RespondAsync("このサーバーには deleteago の設定がありません。", ephemeral: true);
             return;
@@ -71,57 +70,77 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
 
         var components = new ComponentBuilder();
 
-        int index = 1;
-
-        foreach (var e in list)
+        for (int i = 0; i < entries.Count; i++)
         {
+            var e = entries[i];
+
             embed.AddField(
-                $"No.{index}",
+                $"No.{i + 1}",
                 $"チャンネル: <#{e.ChannelId}>\n" +
                 $"日数: **{e.Days}日**\n" +
                 $"保護対象: `{e.ProtectMode}`",
                 inline: false
             );
 
-            components.WithButton($"削除 No.{index}", $"delete_deleteago_{e.Id}", ButtonStyle.Danger);
-            components.WithButton($"編集 No.{index}", $"edit_deleteago_{e.Id}", ButtonStyle.Primary);
-
-            index++;
+            components.WithButton($"削除 No.{i + 1}", $"delete_deleteago_index_{i}", ButtonStyle.Danger);
+            components.WithButton($"編集 No.{i + 1}", $"edit_deleteago_index_{i}", ButtonStyle.Primary);
         }
 
         await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
     }
 
-    // 削除ボタン
-    [ComponentInteraction("delete_deleteago_*")]
-    public async Task DeleteDeleteAgoAsync(string id)
+    // 削除（UI index → DB entry）
+    [ComponentInteraction("delete_deleteago_index_*")]
+    public async Task DeleteDeleteAgoAsync(int index)
     {
-        long entryId = long.Parse(id);
-        await _data.DeleteDeleteAgoAsync(entryId);
-        await RespondAsync($"ID {entryId} を削除しました。", ephemeral: true);
+        var entries = (await _data.GetAllDeleteAgoAsync())
+            .Where(e => e.GuildId == Context.Guild.Id)
+            .ToList();
+
+        if (index < 0 || index >= entries.Count)
+        {
+            await RespondAsync("指定された項目が存在しません。", ephemeral: true);
+            return;
+        }
+
+        var entry = entries[index];
+
+        await _data.DeleteDeleteAgoAsync(entry.Id);
+
+        await RespondAsync($"設定 No.{index + 1} を削除しました。", ephemeral: true);
     }
 
-    // 編集ボタン → Modal（"日数のみ"）
-    [ComponentInteraction("edit_deleteago_*")]
-    public async Task EditDeleteAgoAsync(string id)
+    // 編集（UI index → Modal）
+    [ComponentInteraction("edit_deleteago_index_*")]
+    public async Task EditDeleteAgoAsync(int index)
     {
-        await RespondWithModalAsync<DeleteAgoEditModal>($"edit_deleteago_modal_{id}");
+        var entries = (await _data.GetAllDeleteAgoAsync())
+            .Where(e => e.GuildId == Context.Guild.Id)
+            .ToList();
+
+        if (index < 0 || index >= entries.Count)
+        {
+            await RespondAsync("指定された項目が存在しません。", ephemeral: true);
+            return;
+        }
+
+        var entry = entries[index];
+
+        await RespondWithModalAsync<DeleteAgoEditModal>($"edit_deleteago_modal_{entry.Id}");
     }
 
-    // Modal の受け取り → 日数だけ更新 → SelectMenu を出す
+    // Modal → Days 更新 → ProtectMode 選択へ
     [ModalInteraction("edit_deleteago_modal_*")]
     public async Task EditDeleteAgoModalAsync(string id, DeleteAgoEditModal modal)
     {
         long entryId = long.Parse(id);
 
-        // 日数だけ更新
         await _data.UpdateDeleteAgoAsync(new DeleteAgoEntry
         {
             Id = entryId,
             Days = modal.Days
         });
 
-        // 保護モード選択メニュー
         var menu = new SelectMenuBuilder()
             .WithCustomId($"edit_deleteago_protect_{entryId}")
             .WithPlaceholder("保護対象を選択")
@@ -140,7 +159,7 @@ public class CleanerModule : InteractionModuleBase<SocketInteractionContext>
         );
     }
 
-    // SelectMenu の受け取り → ProtectMode 更新
+    // ProtectMode 更新
     [ComponentInteraction("edit_deleteago_protect_*")]
     public async Task EditDeleteAgoProtectAsync(string id, string[] selected)
     {
