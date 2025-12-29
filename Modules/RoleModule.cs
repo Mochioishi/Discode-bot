@@ -10,6 +10,7 @@ public class PendingRoleGive
     public ulong GuildId { get; set; }
     public ulong ChannelId { get; set; }
     public ulong RoleId { get; set; }
+    public IDiscordInteraction Interaction { get; set; } = null!;
 }
 
 public class RoleModule : InteractionModuleBase<SocketInteractionContext>
@@ -40,7 +41,8 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         {
             GuildId = Context.Guild.Id,
             ChannelId = Context.Channel.Id,
-            RoleId = role.Id
+            RoleId = role.Id,
+            Interaction = Context.Interaction
         };
     }
 
@@ -104,10 +106,12 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
         if (channel != null)
             message = await channel.GetMessageAsync(entry.MessageId) as IUserMessage;
 
-        // 絵文字復元
-        var emote = Emote.TryParse(entry.Emoji, out var custom)
-            ? (IEmote)custom
-            : new Emoji(entry.Emoji);
+        // 絵文字復元（カスタム対応）
+        IEmote emote;
+        if (Emote.TryParse(entry.Emoji, out var custom))
+            emote = custom;
+        else
+            emote = new Emoji(entry.Emoji);
 
         int removedCount = 0;
 
@@ -139,7 +143,7 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             catch { }
         }
 
-        // DB 削除（メッセージが無くても必ず削除）
+        // DB 削除
         await _data.DeleteRoleGiveAsync(entry.Id);
 
         await RespondAsync(
@@ -172,20 +176,32 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
                 if (pending.GuildId == channel.Guild.Id &&
                     pending.ChannelId == channel.Id)
                 {
+                    // 絵文字を統一形式で保存（カスタム対応）
+                    string emojiString =
+                        reaction.Emote is Emote custom
+                        ? custom.ToString() // <:name:id>
+                        : reaction.Emote.ToString();
+
                     var entry = new RoleGiveEntry
                     {
                         GuildId = pending.GuildId,
                         ChannelId = pending.ChannelId,
                         MessageId = reaction.MessageId,
                         RoleId = pending.RoleId,
-                        Emoji = reaction.Emote.ToString()
+                        Emoji = emojiString
                     };
 
                     await _data.AddRoleGiveAsync(entry);
 
+                    // Bot がリアクションを付ける
                     await message.AddReactionAsync(reaction.Emote);
 
-                    // 完了通知は出さない（静かに登録）
+                    // ★ Followup ephemeral（本人だけに見える）
+                    await pending.Interaction.FollowupAsync(
+                        "設定が完了しました！",
+                        ephemeral: true
+                    );
+
                     Pending.Remove(reaction.UserId);
                     return;
                 }
@@ -195,7 +211,10 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
             if (rg == null) return;
 
-            if (reaction.Emote.ToString() != rg.Emoji) return;
+            if (reaction.Emote.ToString() != rg.Emoji &&
+                reaction.Emote is Emote ce &&
+                ce.ToString() != rg.Emoji)
+                return;
 
             var user = channel.Guild.GetUser(reaction.UserId);
             if (user == null) return;
@@ -229,7 +248,10 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
             var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
             if (rg == null) return;
 
-            if (reaction.Emote.ToString() != rg.Emoji) return;
+            if (reaction.Emote.ToString() != rg.Emoji &&
+                reaction.Emote is Emote ce &&
+                ce.ToString() != rg.Emoji)
+                return;
 
             var user = channel.Guild.GetUser(reaction.UserId);
             if (user == null) return;
