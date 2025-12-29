@@ -35,7 +35,7 @@ builder.Services.AddSingleton<InteractionService>();
 builder.Services.AddSingleton<InteractionHandler>();
 builder.Services.AddSingleton<DataService>();
 
-// Modules（v1 用）
+// Modules（RoleModule v1 + PrskRoomIdModule）
 builder.Services.AddTransient<RoleModule>();
 builder.Services.AddTransient<PrskRoomIdModule>();
 
@@ -65,7 +65,7 @@ client.Log += msg =>
 // InteractionService 初期化
 await handler.InitializeAsync();
 
-// ReactionAdded / ReactionRemoved（v1 方式）
+// ReactionAdded / ReactionRemoved（RoleModule v1）
 client.ReactionAdded += roleModule.OnReactionAdded;
 client.ReactionRemoved += roleModule.OnReactionRemoved;
 
