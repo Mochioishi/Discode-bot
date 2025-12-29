@@ -48,10 +48,9 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("rolegive_list", "rolegiveで登録した内容を一覧にする")]
     public async Task RoleGiveListAsync()
     {
-        var entries = await _data.GetRoleGivesByGuildAsync(Context.Guild.Id);
-        var list = entries.ToList();
+        var entries = (await _data.GetRoleGivesByGuildAsync(Context.Guild.Id)).ToList();
 
-        if (list.Count == 0)
+        if (entries.Count == 0)
         {
             await RespondAsync("このサーバーには rolegive の設定がありません。", ephemeral: true);
             return;
@@ -63,94 +62,85 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
         var components = new ComponentBuilder();
 
-        int index = 1;
-
-        foreach (var e in list)
+        for (int i = 0; i < entries.Count; i++)
         {
+            var e = entries[i];
+
             embed.AddField(
-                $"No.{index}",
+                $"No.{i + 1}",
                 $"チャンネル: <#{e.ChannelId}>\n" +
                 $"ロール: <@&{e.RoleId}>\n" +
                 $"絵文字: `{e.Emoji}`",
                 inline: false);
 
             components.WithButton(
-                $"削除 No.{index}",
-                $"delete_rolegive_{e.Id}",
+                $"削除 No.{i + 1}",
+                $"delete_rolegive_index_{i}",
                 ButtonStyle.Danger
             );
-
-            index++;
         }
 
         await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
     }
 
-    // 削除ボタン Interaction（ロール剥奪＋Botリアクション削除＋DB削除）
-    [ComponentInteraction("delete_rolegive_*")]
-    public async Task DeleteRoleGiveAsync(string id)
+    // 削除ボタン Interaction（UI index → DB entry）
+    [ComponentInteraction("delete_rolegive_index_*")]
+    public async Task DeleteRoleGiveAsync(int index)
     {
-        long entryId = long.Parse(id);
+        var entries = (await _data.GetRoleGivesByGuildAsync(Context.Guild.Id)).ToList();
 
-        // 設定取得
-        var entry = await _data.GetRoleGiveByIdAsync(entryId);
-        if (entry == null)
+        if (index < 0 || index >= entries.Count)
         {
-            await RespondAsync("設定が見つかりませんでした。", ephemeral: true);
+            await RespondAsync("指定された項目が存在しません。", ephemeral: true);
             return;
         }
+
+        var entry = entries[index];
 
         var guild = Context.Guild;
         var channel = guild.GetTextChannel(entry.ChannelId);
-        if (channel == null)
-        {
-            await RespondAsync("チャンネルが見つかりませんでした。", ephemeral: true);
-            return;
-        }
 
-        var message = await channel.GetMessageAsync(entry.MessageId) as IUserMessage;
-        if (message == null)
-        {
-            await RespondAsync("対象メッセージが見つかりませんでした。", ephemeral: true);
-            return;
-        }
+        IUserMessage? message = null;
+        if (channel != null)
+            message = await channel.GetMessageAsync(entry.MessageId) as IUserMessage;
 
         // 絵文字復元
         var emote = Emote.TryParse(entry.Emoji, out var custom)
             ? (IEmote)custom
             : new Emoji(entry.Emoji);
 
-        // リアクションしているユーザー取得
-        var users = await message.GetReactionUsersAsync(emote, 100).FlattenAsync();
-
-        var role = guild.GetRole(entry.RoleId);
         int removedCount = 0;
 
-        // ロール剥奪
-        if (role != null)
+        // メッセージが存在する場合のみロール剥奪とリアクション削除
+        if (message != null)
         {
-            foreach (var u in users)
-            {
-                if (u.IsBot) continue;
+            var users = await message.GetReactionUsersAsync(emote, 100).FlattenAsync();
+            var role = guild.GetRole(entry.RoleId);
 
-                var gUser = guild.GetUser(u.Id);
-                if (gUser != null && gUser.Roles.Any(r => r.Id == role.Id))
+            if (role != null)
+            {
+                foreach (var u in users)
                 {
-                    await gUser.RemoveRoleAsync(role);
-                    removedCount++;
+                    if (u.IsBot) continue;
+
+                    var gUser = guild.GetUser(u.Id);
+                    if (gUser != null && gUser.Roles.Any(r => r.Id == role.Id))
+                    {
+                        await gUser.RemoveRoleAsync(role);
+                        removedCount++;
+                    }
                 }
             }
+
+            try
+            {
+                await message.RemoveReactionAsync(emote, _client.CurrentUser);
+            }
+            catch { }
         }
 
-        // Bot のリアクション削除
-        try
-        {
-            await message.RemoveReactionAsync(emote, _client.CurrentUser);
-        }
-        catch { }
-
-        // DB 削除
-        await _data.DeleteRoleGiveAsync(entryId);
+        // DB 削除（メッセージが無くても必ず削除）
+        await _data.DeleteRoleGiveAsync(entry.Id);
 
         await RespondAsync(
             $"設定を削除しました。\n" +
@@ -193,10 +183,8 @@ public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 
                     await _data.AddRoleGiveAsync(entry);
 
-                    // Bot もリアクションを付ける
                     await message.AddReactionAsync(reaction.Emote);
 
-                    // Interaction ではないので FollowupAsync は使えない
                     await channel.SendMessageAsync(
                         embed: new EmbedBuilder()
                             .WithTitle("🎉 rolegive の設定が完了しました！")
