@@ -35,8 +35,8 @@ builder.Services.AddSingleton<InteractionService>();
 builder.Services.AddSingleton<InteractionHandler>();
 builder.Services.AddSingleton<DataService>();
 
-// Modules（v2 用）
-builder.Services.AddTransient<RoleModuleV2>();
+// Modules（v1 用）
+builder.Services.AddTransient<RoleModule>();
 builder.Services.AddTransient<PrskRoomIdModule>();
 
 // Worker
@@ -52,7 +52,7 @@ var client = app.Services.GetRequiredService<DiscordSocketClient>();
 var handler = app.Services.GetRequiredService<InteractionHandler>();
 
 // Modules（DI から取得）
-var roleModule = app.Services.GetRequiredService<RoleModuleV2>();
+var roleModule = app.Services.GetRequiredService<RoleModule>();
 var prskModule = app.Services.GetRequiredService<PrskRoomIdModule>();
 
 // ログ
@@ -65,15 +65,12 @@ client.Log += msg =>
 // InteractionService 初期化
 await handler.InitializeAsync();
 
-// ReactionAdded / ReactionRemoved は v2 では不要
-// client.ReactionAdded += roleModule.OnReactionAdded;
-// client.ReactionRemoved += roleModule.OnReactionRemoved;
+// ReactionAdded / ReactionRemoved（v1 方式）
+client.ReactionAdded += roleModule.OnReactionAdded;
+client.ReactionRemoved += roleModule.OnReactionRemoved;
 
 // roomid の MessageReceived を登録
 client.MessageReceived += prskModule.OnMessageReceived;
-
-// rolegive v2 のメッセージ受信（リンク・絵文字入力）
-client.MessageReceived += roleModule.OnMessageReceived;
 
 // Bot 起動
 var token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
