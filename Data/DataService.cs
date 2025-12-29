@@ -5,49 +5,6 @@ using Microsoft.Extensions.Configuration;
 namespace DiscordTimeSignal.Data;
 
 // =======================
-// エンティティ定義
-// =======================
-public class RoleGiveEntry
-{
-    public long Id { get; set; }
-    public ulong GuildId { get; set; }
-    public ulong ChannelId { get; set; }
-    public ulong MessageId { get; set; }
-    public ulong RoleId { get; set; }
-    public string Emoji { get; set; } = "";
-}
-
-public class PrskRoomIdEntry
-{
-    public long Id { get; set; }
-    public ulong GuildId { get; set; }
-    public ulong WatchChannelId { get; set; }
-    public ulong TargetChannelId { get; set; }
-    public string NameFormat { get; set; } = "";
-}
-
-public class BotTextEntry
-{
-    public long Id { get; set; }
-    public ulong GuildId { get; set; }
-    public ulong ChannelId { get; set; }
-    public string Content { get; set; } = "";
-    public bool IsEmbed { get; set; }
-    public string? EmbedTitle { get; set; }
-    public string TimeHhmm { get; set; } = "";
-}
-
-public class DeleteAgoEntry
-{
-    public long Id { get; set; }
-    public ulong GuildId { get; set; }
-    public ulong ChannelId { get; set; }
-    public int Days { get; set; }
-    // "none" / "image" / "reaction" / "both"
-    public string ProtectMode { get; set; } = "none";
-}
-
-// =======================
 // DataService 本体
 // =======================
 public class DataService
