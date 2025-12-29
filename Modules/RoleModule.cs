@@ -5,146 +5,242 @@ using DiscordTimeSignal.Data;
 
 namespace DiscordTimeSignal.Modules;
 
-public class PendingRoleGiveV2
+public class PendingRoleGive
 {
     public ulong GuildId { get; set; }
-    public ulong RoleId { get; set; }
-    public int Step { get; set; } = 1;
     public ulong ChannelId { get; set; }
-    public ulong MessageId { get; set; }
+    public ulong RoleId { get; set; }
 }
 
-public class RoleModuleV2 : InteractionModuleBase<SocketInteractionContext>
+public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly DataService _data;
     private readonly DiscordSocketClient _client;
 
-    private static readonly Dictionary<ulong, PendingRoleGiveV2> Pending = new();
+    private static readonly Dictionary<ulong, PendingRoleGive> Pending = new();
 
-    public RoleModuleV2(DataService data, DiscordSocketClient client)
+    public RoleModule(DataService data, DiscordSocketClient client)
     {
         _data = data;
         _client = client;
     }
 
     // /rolegive
-    [SlashCommand("rolegive", "リアクションロールを設定します（v2）")]
-    public async Task RoleGiveStart(IRole role)
+    [SlashCommand("rolegive", "リアクションでロール付与/はく奪する設定を開始します")]
+    public async Task RoleGiveAsync(
+        [Summary("role", "付与するロール")] IRole role)
     {
-        Pending[Context.User.Id] = new PendingRoleGiveV2
+        await RespondAsync(
+            $"ロール {role.Mention} を設定します。\n" +
+            $"このチャンネル内の **既存のメッセージ** に、使いたい絵文字でリアクションしてください。\n" +
+            $"リアクション後に設定が完了します。",
+            ephemeral: true);
+
+        Pending[Context.User.Id] = new PendingRoleGive
         {
             GuildId = Context.Guild.Id,
-            RoleId = role.Id,
-            Step = 1
+            ChannelId = Context.Channel.Id,
+            RoleId = role.Id
         };
+    }
+
+    // /rolegive_list（UI 連番対応）
+    [SlashCommand("rolegive_list", "rolegiveで登録した内容を一覧にする")]
+    public async Task RoleGiveListAsync()
+    {
+        var entries = (await _data.GetRoleGivesByGuildAsync(Context.Guild.Id)).ToList();
+
+        if (entries.Count == 0)
+        {
+            await RespondAsync("このサーバーには rolegive の設定がありません。", ephemeral: true);
+            return;
+        }
+
+        var embed = new EmbedBuilder()
+            .WithTitle("🎭 rolegive 設定一覧")
+            .WithColor(Color.Blue);
+
+        var components = new ComponentBuilder();
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var e = entries[i];
+
+            embed.AddField(
+                $"No.{i + 1}",
+                $"チャンネル: <#{e.ChannelId}>\n" +
+                $"ロール: <@&{e.RoleId}>\n" +
+                $"絵文字: `{e.Emoji}`",
+                inline: false);
+
+            components.WithButton(
+                $"削除 No.{i + 1}",
+                $"delete_rolegive_index_{i}",
+                ButtonStyle.Danger
+            );
+        }
+
+        await RespondAsync(embed: embed.Build(), components: components.Build(), ephemeral: true);
+    }
+
+    // 削除ボタン Interaction（UI index → DB entry）
+    [ComponentInteraction("delete_rolegive_index_*")]
+    public async Task DeleteRoleGiveAsync(int index)
+    {
+        var entries = (await _data.GetRoleGivesByGuildAsync(Context.Guild.Id)).ToList();
+
+        if (index < 0 || index >= entries.Count)
+        {
+            await RespondAsync("指定された項目が存在しません。", ephemeral: true);
+            return;
+        }
+
+        var entry = entries[index];
+
+        var guild = Context.Guild;
+        var channel = guild.GetTextChannel(entry.ChannelId);
+
+        IUserMessage? message = null;
+        if (channel != null)
+            message = await channel.GetMessageAsync(entry.MessageId) as IUserMessage;
+
+        // 絵文字復元
+        var emote = Emote.TryParse(entry.Emoji, out var custom)
+            ? (IEmote)custom
+            : new Emoji(entry.Emoji);
+
+        int removedCount = 0;
+
+        // メッセージが存在する場合のみロール剥奪とリアクション削除
+        if (message != null)
+        {
+            var users = await message.GetReactionUsersAsync(emote, 100).FlattenAsync();
+            var role = guild.GetRole(entry.RoleId);
+
+            if (role != null)
+            {
+                foreach (var u in users)
+                {
+                    if (u.IsBot) continue;
+
+                    var gUser = guild.GetUser(u.Id);
+                    if (gUser != null && gUser.Roles.Any(r => r.Id == role.Id))
+                    {
+                        await gUser.RemoveRoleAsync(role);
+                        removedCount++;
+                    }
+                }
+            }
+
+            try
+            {
+                await message.RemoveReactionAsync(emote, _client.CurrentUser);
+            }
+            catch { }
+        }
+
+        // DB 削除（メッセージが無くても必ず削除）
+        await _data.DeleteRoleGiveAsync(entry.Id);
 
         await RespondAsync(
-            "ロールを付与したいメッセージのリンクを送ってください。",
+            $"設定を削除しました。\n" +
+            $"ロール解除対象: **{removedCount}人**\n" +
+            $"Bot のリアクションも削除しました。",
             ephemeral: true
         );
     }
 
-    // メッセージ受信（リンク → 絵文字）
-    public async Task OnMessageReceived(SocketMessage msg)
+    // ReactionAdded
+    public async Task OnReactionAdded(
+        Cacheable<IUserMessage, ulong> cache,
+        Cacheable<IMessageChannel, ulong> ch,
+        SocketReaction reaction)
     {
-        if (!Pending.TryGetValue(msg.Author.Id, out var pending)) return;
-        if (msg.Author.IsBot) return;
-
-        // Step1: メッセージリンク
-        if (pending.Step == 1)
+        try
         {
-            var match = System.Text.RegularExpressions.Regex.Match(
-                msg.Content,
-                @"https://discord.com/channels/\d+/(\d+)/(\d+)"
-            );
+            if (reaction.UserId == _client.CurrentUser.Id) return;
 
-            if (!match.Success)
+            var message = await cache.GetOrDownloadAsync();
+            if (message == null) return;
+
+            var channel = message.Channel as SocketTextChannel;
+            if (channel == null) return;
+
+            // ① 設定直後の登録処理
+            if (Pending.TryGetValue(reaction.UserId, out var pending))
             {
-                await msg.Author.SendMessageAsync("メッセージリンクが正しくありません。");
-                return;
+                if (pending.GuildId == channel.Guild.Id &&
+                    pending.ChannelId == channel.Id)
+                {
+                    var entry = new RoleGiveEntry
+                    {
+                        GuildId = pending.GuildId,
+                        ChannelId = pending.ChannelId,
+                        MessageId = reaction.MessageId,
+                        RoleId = pending.RoleId,
+                        Emoji = reaction.Emote.ToString()
+                    };
+
+                    await _data.AddRoleGiveAsync(entry);
+
+                    await message.AddReactionAsync(reaction.Emote);
+
+                    // 完了通知は出さない（静かに登録）
+                    Pending.Remove(reaction.UserId);
+                    return;
+                }
             }
 
-            pending.ChannelId = ulong.Parse(match.Groups[1].Value);
-            pending.MessageId = ulong.Parse(match.Groups[2].Value);
-            pending.Step = 2;
+            // ② 通常のロール付与処理
+            var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
+            if (rg == null) return;
 
-            await msg.Author.SendMessageAsync("次に、使用する絵文字を送ってください。");
-            return;
+            if (reaction.Emote.ToString() != rg.Emoji) return;
+
+            var user = channel.Guild.GetUser(reaction.UserId);
+            if (user == null) return;
+
+            var role = channel.Guild.GetRole(rg.RoleId);
+            if (role != null)
+                await user.AddRoleAsync(role);
         }
-
-        // Step2: 絵文字
-        if (pending.Step == 2)
+        catch (Exception ex)
         {
-            string emoji = msg.Content.Trim();
-
-            var channel = _client.GetGuild(pending.GuildId).GetTextChannel(pending.ChannelId);
-            var message = await channel.GetMessageAsync(pending.MessageId) as IUserMessage;
-
-            if (message == null)
-            {
-                await msg.Author.SendMessageAsync("メッセージが見つかりませんでした。");
-                Pending.Remove(msg.Author.Id);
-                return;
-            }
-
-            // DB 保存
-            var entry = new RoleGiveEntry
-            {
-                GuildId = pending.GuildId,
-                ChannelId = pending.ChannelId,
-                MessageId = pending.MessageId,
-                RoleId = pending.RoleId,
-                Emoji = emoji
-            };
-
-            await _data.AddRoleGiveAsync(entry);
-
-            // Bot がリアクションを付ける
-            await message.AddReactionAsync(new Emoji(emoji));
-
-            // ボタンを付ける（ロール付与/剥奪）
-            var builder = new ComponentBuilder()
-                .WithButton("ロールを付与/解除", $"rolegive_toggle_{entry.Id}", ButtonStyle.Primary);
-
-            await message.ModifyAsync(m => m.Components = builder.Build());
-
-            await msg.Author.SendMessageAsync("設定が完了しました！");
-            Pending.Remove(msg.Author.Id);
+            Console.WriteLine($"[ReactionAdded ERROR] {ex}");
         }
     }
 
-    // ボタン → ロール付与/剥奪
-    [ComponentInteraction("rolegive_toggle_*")]
-    public async Task ToggleRoleAsync(string id)
+    // ReactionRemoved
+    public async Task OnReactionRemoved(
+        Cacheable<IUserMessage, ulong> cache,
+        Cacheable<IMessageChannel, ulong> ch,
+        SocketReaction reaction)
     {
-        long entryId = long.Parse(id);
-
-        var entry = await _data.GetRoleGiveByIdAsync(entryId);
-        if (entry == null)
+        try
         {
-            await RespondAsync("設定が見つかりません。", ephemeral: true);
-            return;
+            if (reaction.UserId == _client.CurrentUser.Id) return;
+
+            var message = await cache.GetOrDownloadAsync();
+            if (message == null) return;
+
+            var channel = message.Channel as SocketTextChannel;
+            if (channel == null) return;
+
+            var rg = await _data.GetRoleGiveByMessageAsync(channel.Guild.Id, channel.Id, reaction.MessageId);
+            if (rg == null) return;
+
+            if (reaction.Emote.ToString() != rg.Emoji) return;
+
+            var user = channel.Guild.GetUser(reaction.UserId);
+            if (user == null) return;
+
+            var role = channel.Guild.GetRole(rg.RoleId);
+            if (role != null)
+                await user.RemoveRoleAsync(role);
         }
-
-        var guild = Context.Guild;
-        var user = guild.GetUser(Context.User.Id);
-        var role = guild.GetRole(entry.RoleId);
-
-        if (user == null || role == null)
+        catch (Exception ex)
         {
-            await RespondAsync("ロール操作に失敗しました。", ephemeral: true);
-            return;
-        }
-
-        if (user.Roles.Any(r => r.Id == role.Id))
-        {
-            await user.RemoveRoleAsync(role);
-            await RespondAsync("ロールを解除しました。", ephemeral: true);
-        }
-        else
-        {
-            await user.AddRoleAsync(role);
-            await RespondAsync("ロールを付与しました。", ephemeral: true);
+            Console.WriteLine($"[ReactionRemoved ERROR] {ex}");
         }
     }
 }
