@@ -45,8 +45,8 @@ builder.Services.AddHostedService<TimeSignalWorker>();
 var app = builder.Build();
 
 // DB 初期化
-var dataService = app.Services.GetRequiredService<DataService>();
-await dataService.EnsureTablesAsync();
+// var dataService = app.Services.GetRequiredService<DataService>();
+// await dataService.EnsureTablesAsync();
 
 var client = app.Services.GetRequiredService<DiscordSocketClient>();
 var handler = app.Services.GetRequiredService<InteractionHandler>();
