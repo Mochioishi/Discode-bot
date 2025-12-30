@@ -13,41 +13,8 @@ public class DataService
 
     public DataService(IConfiguration config)
     {
-        // 1. Railwayの環境変数を取得
-        var url = Environment.GetEnvironmentVariable("DATABASE_URL");
-
-        if (string.IsNullOrEmpty(url))
-        {
-            throw new Exception("環境変数 DATABASE_URL が設定されていません。RailwayのVariablesを確認してください。");
-        }
-
-        // 2. postgres:// 形式を Npgsql が確実に解釈できる形式に変換
-        // 接続エラーを防ぐため、SSL設定と証明書信頼設定を強制付与します
-        _connectionString = ConvertPostgresUrlToConnectionString(url);
-    }
-
-    /// <summary>
-    /// postgres:// 形式の URL を Npgsql 用の接続文字列に変換する
-    /// </summary>
-    private string ConvertPostgresUrlToConnectionString(string url)
-    {
-        if (!url.Contains("://")) return url;
-
-        try 
-        {
-            var uri = new Uri(url);
-            var userInfo = uri.UserInfo.Split(':');
-            var user = userInfo[0];
-            var password = userInfo.Length > 1 ? userInfo[1] : "";
-
-            // RailwayのPostgres接続には SSL Mode=Require と Trust Server Certificate=true が必須です
-            return $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.Trim('/')};Username={user};Password={password};SSL Mode=Require;Trust Server Certificate=true;";
-        }
-        catch
-        {
-            // 解析に失敗した場合は、SSL設定だけ付け足してそのまま返す
-            return url.Contains("?") ? $"{url}&sslmode=Require" : $"{url}?sslmode=Require";
-        }
+        // 重要：新しく作成した DbConfig から接続文字列を 1 箇所で取得するように一本化します
+        _connectionString = DbConfig.GetConnectionString();
     }
 
     private NpgsqlConnection GetConnection()
