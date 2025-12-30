@@ -10,21 +10,29 @@ public static class DbConfig
 
         if (string.IsNullOrEmpty(url))
         {
-            throw new Exception("DATABASE_URL が設定されていません。");
+            throw new Exception("環境変数 DATABASE_URL が設定されていません。");
         }
 
-        // 修正：postgresql:// (lあり) にも対応するように変更
-        if (url.StartsWith("postgres://") || url.StartsWith("postgresql://"))
+        try
         {
-            // postgresql:// を postgres:// に統一して解析しやすくする
+            // postgresql:// (lあり) を postgres:// (lなし) に置換して Uri クラスで解析しやすくする
             var normalizedUrl = url.Replace("postgresql://", "postgres://");
-            var uri = new Uri(normalizedUrl);
-            var userInfo = uri.UserInfo.Split(':');
-            var user = userInfo[0];
-            var password = userInfo.Length > 1 ? userInfo[1] : "";
+            
+            if (normalizedUrl.StartsWith("postgres://"))
+            {
+                var uri = new Uri(normalizedUrl);
+                var userInfo = uri.UserInfo.Split(':');
+                var user = userInfo[0];
+                var password = userInfo.Length > 1 ? userInfo[1] : "";
 
-            // Railwayの接続に必須な設定を付与
-            return $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.Trim('/')};Username={user};Password={password};SSL Mode=Require;Trust Server Certificate=true;";
+                // Railway接続に必須な SSL 設定をすべて詰め込んだ接続文字列を生成
+                return $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.Trim('/')};Username={user};Password={password};SSL Mode=Require;Trust Server Certificate=true;Pooling=true;";
+            }
+        }
+        catch
+        {
+            // 解析に失敗した場合は、SSL設定を末尾に足して返す
+            return url.Contains("?") ? $"{url}&sslmode=Require" : $"{url}?sslmode=Require";
         }
 
         return url;
