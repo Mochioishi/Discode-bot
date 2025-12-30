@@ -13,7 +13,7 @@ public class DataService
 
     public DataService(IConfiguration config)
     {
-        // 重要：新しく作成した DbConfig から接続文字列を 1 箇所で取得するように一本化します
+        // 重要：新しく作成した DbConfig から接続文字列を 1 箇所で取得するように一本化
         _connectionString = DbConfig.GetConnectionString();
     }
 
