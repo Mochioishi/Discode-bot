@@ -8,24 +8,12 @@ public class DataService
 {
     private readonly string _connectionString;
 
-    public DataService(IConfiguration config)
-    {
-        // 1. まず環境変数 DATABASE_URL を確認
-        var rawUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
-        
-        if (!string.IsNullOrEmpty(rawUrl))
-        {
-            // postgres:// 形式を Npgsql が解釈できる形式に変換（安定性の向上）
-            _connectionString = ConvertPostgresUrlToConnectionString(rawUrl);
-        }
-        else
-        {
-            // 2. なければ appsettings.json や個別の PG 変数を確認
-            _connectionString = config.GetConnectionString("DefaultConnection")
-                ?? BuildConnectionStringFromIndividualVars()
-                ?? throw new Exception("DB 接続文字列 (DATABASE_URL) が設定されていません。");
-        }
-    }
+public DataService(IConfiguration config)
+{
+    // 複雑な変換を一切せず、RailwayのDATABASE_URLをそのまま使う
+    _connectionString = Environment.GetEnvironmentVariable("DATABASE_URL")
+        ?? throw new Exception("環境変数 DATABASE_URL が設定されていません。");
+}
 
     /// <summary>
     /// postgres:// 形式の URL を Npgsql 用の接続文字列に変換する
