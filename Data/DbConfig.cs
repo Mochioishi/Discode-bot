@@ -6,23 +6,24 @@ public static class DbConfig
 {
     public static string GetConnectionString()
     {
-        // 1. DATABASE_URL を最優先で取得
         var url = Environment.GetEnvironmentVariable("DATABASE_URL");
 
         if (string.IsNullOrEmpty(url))
         {
-            throw new Exception("DATABASE_URL が設定されていません。RailwayのVariablesを確認してください。");
+            throw new Exception("DATABASE_URL が設定されていません。");
         }
 
-        // 2. postgres:// 形式を Npgsql 用に整形
-        if (url.StartsWith("postgres://"))
+        // 修正：postgresql:// (lあり) にも対応するように変更
+        if (url.StartsWith("postgres://") || url.StartsWith("postgresql://"))
         {
-            var uri = new Uri(url);
+            // postgresql:// を postgres:// に統一して解析しやすくする
+            var normalizedUrl = url.Replace("postgresql://", "postgres://");
+            var uri = new Uri(normalizedUrl);
             var userInfo = uri.UserInfo.Split(':');
             var user = userInfo[0];
             var password = userInfo.Length > 1 ? userInfo[1] : "";
 
-            // Railwayの接続に必須な設定を強制付与
+            // Railwayの接続に必須な設定を付与
             return $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.Trim('/')};Username={user};Password={password};SSL Mode=Require;Trust Server Certificate=true;";
         }
 
