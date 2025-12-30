@@ -4,16 +4,27 @@ using Microsoft.Extensions.Configuration;
 
 namespace DiscordTimeSignal.Data;
 
+// =======================
+// DataService 本体
+// =======================
 public class DataService
 {
     private readonly string _connectionString;
 
-public DataService(IConfiguration config)
-{
-    // 複雑な変換を一切せず、RailwayのDATABASE_URLをそのまま使う
-    _connectionString = Environment.GetEnvironmentVariable("DATABASE_URL")
-        ?? throw new Exception("環境変数 DATABASE_URL が設定されていません。");
-}
+    public DataService(IConfiguration config)
+    {
+        // 1. Railwayの環境変数を取得
+        var url = Environment.GetEnvironmentVariable("DATABASE_URL");
+
+        if (string.IsNullOrEmpty(url))
+        {
+            throw new Exception("環境変数 DATABASE_URL が設定されていません。RailwayのVariablesを確認してください。");
+        }
+
+        // 2. postgres:// 形式を Npgsql が確実に解釈できる形式に変換
+        // 接続エラーを防ぐため、SSL設定と証明書信頼設定を強制付与します
+        _connectionString = ConvertPostgresUrlToConnectionString(url);
+    }
 
     /// <summary>
     /// postgres:// 形式の URL を Npgsql 用の接続文字列に変換する
@@ -22,32 +33,28 @@ public DataService(IConfiguration config)
     {
         if (!url.Contains("://")) return url;
 
-        var uri = new Uri(url);
-        var userInfo = uri.UserInfo.Split(':');
-        var user = userInfo[0];
-        var password = userInfo.Length > 1 ? userInfo[1] : "";
+        try 
+        {
+            var uri = new Uri(url);
+            var userInfo = uri.UserInfo.Split(':');
+            var user = userInfo[0];
+            var password = userInfo.Length > 1 ? userInfo[1] : "";
 
-        return $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.Trim('/')};Username={user};Password={password};SSL Mode=Require;Trust Server Certificate=true;";
-    }
-
-    private string? BuildConnectionStringFromIndividualVars()
-    {
-        var host = Environment.GetEnvironmentVariable("PGHOST");
-        if (string.IsNullOrEmpty(host)) return null;
-
-        return $"Host={host};" +
-               $"Port={Environment.GetEnvironmentVariable("PGPORT")};" +
-               $"Database={Environment.GetEnvironmentVariable("PGDATABASE")};" +
-               $"Username={Environment.GetEnvironmentVariable("PGUSER")};" +
-               $"Password={Environment.GetEnvironmentVariable("PGPASSWORD")};" +
-               $"SSL Mode=Require;Trust Server Certificate=true;";
+            // RailwayのPostgres接続には SSL Mode=Require と Trust Server Certificate=true が必須です
+            return $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.Trim('/')};Username={user};Password={password};SSL Mode=Require;Trust Server Certificate=true;";
+        }
+        catch
+        {
+            // 解析に失敗した場合は、SSL設定だけ付け足してそのまま返す
+            return url.Contains("?") ? $"{url}&sslmode=Require" : $"{url}?sslmode=Require";
+        }
     }
 
     private NpgsqlConnection GetConnection()
         => new NpgsqlConnection(_connectionString);
 
     // ============================================================
-    // テーブル初期化（Program.cs から呼ばれる）
+    // テーブル初期化
     // ============================================================
     public async Task EnsureTablesAsync()
     {
@@ -91,6 +98,7 @@ public DataService(IConfiguration config)
                 protect_mode TEXT NOT NULL
             );
         ";
+
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -411,7 +419,6 @@ public DataService(IConfiguration config)
         using var conn = GetConnection();
         await conn.OpenAsync();
 
-        // 部分更新対応: Days または ProtectMode のどちらか／両方が設定される
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             UPDATE deleteago
