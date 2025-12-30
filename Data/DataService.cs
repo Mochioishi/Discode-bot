@@ -4,21 +4,107 @@ using Microsoft.Extensions.Configuration;
 
 namespace DiscordTimeSignal.Data;
 
-// =======================
-// DataService 本体
-// =======================
 public class DataService
 {
     private readonly string _connectionString;
 
     public DataService(IConfiguration config)
     {
-        _connectionString = config.GetConnectionString("DefaultConnection")
-            ?? throw new Exception("DB 接続文字列が設定されていません。");
+        // 1. まず環境変数 DATABASE_URL を確認
+        var rawUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+        
+        if (!string.IsNullOrEmpty(rawUrl))
+        {
+            // postgres:// 形式を Npgsql が解釈できる形式に変換（安定性の向上）
+            _connectionString = ConvertPostgresUrlToConnectionString(rawUrl);
+        }
+        else
+        {
+            // 2. なければ appsettings.json や個別の PG 変数を確認
+            _connectionString = config.GetConnectionString("DefaultConnection")
+                ?? BuildConnectionStringFromIndividualVars()
+                ?? throw new Exception("DB 接続文字列 (DATABASE_URL) が設定されていません。");
+        }
+    }
+
+    /// <summary>
+    /// postgres:// 形式の URL を Npgsql 用の接続文字列に変換する
+    /// </summary>
+    private string ConvertPostgresUrlToConnectionString(string url)
+    {
+        if (!url.Contains("://")) return url;
+
+        var uri = new Uri(url);
+        var userInfo = uri.UserInfo.Split(':');
+        var user = userInfo[0];
+        var password = userInfo.Length > 1 ? userInfo[1] : "";
+
+        return $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.Trim('/')};Username={user};Password={password};SSL Mode=Require;Trust Server Certificate=true;";
+    }
+
+    private string? BuildConnectionStringFromIndividualVars()
+    {
+        var host = Environment.GetEnvironmentVariable("PGHOST");
+        if (string.IsNullOrEmpty(host)) return null;
+
+        return $"Host={host};" +
+               $"Port={Environment.GetEnvironmentVariable("PGPORT")};" +
+               $"Database={Environment.GetEnvironmentVariable("PGDATABASE")};" +
+               $"Username={Environment.GetEnvironmentVariable("PGUSER")};" +
+               $"Password={Environment.GetEnvironmentVariable("PGPASSWORD")};" +
+               $"SSL Mode=Require;Trust Server Certificate=true;";
     }
 
     private NpgsqlConnection GetConnection()
         => new NpgsqlConnection(_connectionString);
+
+    // ============================================================
+    // テーブル初期化（Program.cs から呼ばれる）
+    // ============================================================
+    public async Task EnsureTablesAsync()
+    {
+        using var conn = GetConnection();
+        await conn.OpenAsync();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS rolegive (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL,
+                message_id BIGINT NOT NULL,
+                role_id BIGINT NOT NULL,
+                emoji TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS prsk_roomid (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                watch_channel_id BIGINT NOT NULL,
+                target_channel_id BIGINT NOT NULL,
+                name_format TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS bottext (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL,
+                content TEXT NOT NULL,
+                is_embed BOOLEAN NOT NULL,
+                embed_title TEXT NULL,
+                time_hhmm TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS deleteago (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL,
+                days INT NOT NULL,
+                protect_mode TEXT NOT NULL
+            );
+        ";
+        await cmd.ExecuteNonQueryAsync();
+    }
 
     // ============================================================
     // RoleGive
