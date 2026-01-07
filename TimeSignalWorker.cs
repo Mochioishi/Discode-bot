@@ -20,7 +20,6 @@ namespace DiscordBot.Services
             _client = client;
             _connectionString = GetConnectionString();
             
-            // 環境変数 TIMEZONE (Asia/Tokyo) を使用してタイムゾーンを設定
             var tzId = Environment.GetEnvironmentVariable("TIMEZONE") ?? "Asia/Tokyo";
             _jst = TimeZoneInfo.FindSystemTimeZoneById(tzId);
         }
@@ -48,6 +47,16 @@ namespace DiscordBot.Services
             {
                 var nowJst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _jst);
                 string currentTime = nowJst.ToString("HHmm");
+                DayOfWeek today = nowJst.DayOfWeek;
+
+                // --- 固定アラーム（平日のみ、削除・一覧化不可） ---
+                if (today != DayOfWeek.Saturday && today != DayOfWeek.Sunday)
+                {
+                    if (currentTime == "0825" || currentTime == "1255" || currentTime == "1720")
+                    {
+                        await SendFixedAlarm();
+                    }
+                }
 
                 // 1. 予約投稿のチェック (毎分)
                 await ProcessScheduledMessages(currentTime);
@@ -60,6 +69,19 @@ namespace DiscordBot.Services
 
                 // 次の00秒まで待機
                 await Task.Delay(60000 - (nowJst.Second * 1000), stoppingToken);
+            }
+        }
+
+        // --- 固定アラーム送信ロジック ---
+        private async Task SendFixedAlarm()
+        {
+            var targetIdEnv = Environment.GetEnvironmentVariable("TARGET_CHANNEL_ID");
+            if (ulong.TryParse(targetIdEnv, out var channelId))
+            {
+                if (await _client.GetChannelAsync(channelId) is ITextChannel channel)
+                {
+                    await channel.SendMessageAsync("🔆アラーム！");
+                }
             }
         }
 
@@ -115,7 +137,7 @@ namespace DiscordBot.Services
             {
                 var channelId = ulong.Parse(reader.GetString(0));
                 var days = reader.GetInt32(1);
-                var protection = reader.GetString(2); // "None", "Image", "Reaction", "Both"
+                var protection = reader.GetString(2); 
 
                 if (await _client.GetChannelAsync(channelId) is ITextChannel channel)
                 {
@@ -126,7 +148,6 @@ namespace DiscordBot.Services
                     {
                         if (message.CreatedAt < cutoffDate)
                         {
-                            // 保護対象のチェック
                             bool hasImage = message.Attachments.Count > 0;
                             bool hasReaction = message.Reactions.Count > 0;
 
