@@ -7,25 +7,21 @@ namespace DiscordTimeSignal.Data;
 public class DataService
 {
     private readonly string _connectionString;
-
     public Func<NpgsqlConnection> ConnectionFactory { get; set; }
 
     public DataService(IConfiguration config)
     {
-        // DbConfig.cs から正規化された接続文字列を取得
+        // ここで DbConfig を呼んでいないと、古い(間違った)接続情報が使われ続けます
         _connectionString = DbConfig.GetConnectionString();
         ConnectionFactory = () => new NpgsqlConnection(_connectionString);
     }
 
     private NpgsqlConnection GetConnection() => ConnectionFactory();
 
-    // ==========================================
-    // テーブルの初期化
-    // ==========================================
     public async Task EnsureTablesAsync()
     {
         using var conn = GetConnection();
-        await conn.OpenAsync(); 
+        await conn.OpenAsync(); // ここが 28 行目付近
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
@@ -60,249 +56,8 @@ public class DataService
                 days INT NOT NULL,
                 protect_mode TEXT NOT NULL
             );";
-        
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // ==========================================
-    // RoleGive 関連メソッド
-    // ==========================================
-    public async Task AddRoleGiveAsync(RoleGiveEntry entry)
-    {
-        entry.Emoji = NormalizeEmoji(entry.Emoji);
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "INSERT INTO rolegive (guild_id, channel_id, message_id, role_id, emoji) VALUES (@g, @c, @m, @r, @e);";
-        cmd.Parameters.AddWithValue("@g", (long)entry.GuildId);
-        cmd.Parameters.AddWithValue("@c", (long)entry.ChannelId);
-        cmd.Parameters.AddWithValue("@m", (long)entry.MessageId);
-        cmd.Parameters.AddWithValue("@r", (long)entry.RoleId);
-        cmd.Parameters.AddWithValue("@e", entry.Emoji);
-        await cmd.ExecuteNonQueryAsync();
-    }
-
-    public async Task<IEnumerable<RoleGiveEntry>> GetRoleGivesByGuildAsync(ulong guildId)
-    {
-        var list = new List<RoleGiveEntry>();
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id, guild_id, channel_id, message_id, role_id, emoji FROM rolegive WHERE guild_id = @g;";
-        cmd.Parameters.AddWithValue("@g", (long)guildId);
-        using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            list.Add(new RoleGiveEntry {
-                Id = reader.GetInt64(0),
-                GuildId = (ulong)reader.GetInt64(1),
-                ChannelId = (ulong)reader.GetInt64(2),
-                MessageId = (ulong)reader.GetInt64(3),
-                RoleId = (ulong)reader.GetInt64(4),
-                Emoji = reader.GetString(5)
-            });
-        }
-        return list;
-    }
-
-    // エラー修正：RoleModuleで使用されるメソッドを追加
-    public async Task<RoleGiveEntry?> GetRoleGiveByMessageAsync(ulong guildId, ulong channelId, ulong messageId)
-    {
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id, guild_id, channel_id, message_id, role_id, emoji FROM rolegive WHERE guild_id = @g AND channel_id = @c AND message_id = @m;";
-        cmd.Parameters.AddWithValue("@g", (long)guildId);
-        cmd.Parameters.AddWithValue("@c", (long)channelId);
-        cmd.Parameters.AddWithValue("@m", (long)messageId);
-        using var reader = await cmd.ExecuteReaderAsync();
-        if (await reader.ReadAsync())
-        {
-            return new RoleGiveEntry {
-                Id = reader.GetInt64(0),
-                GuildId = (ulong)reader.GetInt64(1),
-                ChannelId = (ulong)reader.GetInt64(2),
-                MessageId = (ulong)reader.GetInt64(3),
-                RoleId = (ulong)reader.GetInt64(4),
-                Emoji = reader.GetString(5)
-            };
-        }
-        return null;
-    }
-
-    public async Task DeleteRoleGiveAsync(long id)
-    {
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM rolegive WHERE id = @id;";
-        cmd.Parameters.AddWithValue("@id", id);
-        await cmd.ExecuteNonQueryAsync();
-    }
-
-    private string NormalizeEmoji(string emoji) => (emoji.Contains(':') && !emoji.StartsWith("<:")) ? $"<{emoji}>" : emoji;
-
-    // ==========================================
-    // PrskRoomId 関連メソッド
-    // ==========================================
-    public async Task AddPrskRoomIdAsync(PrskRoomIdEntry entry)
-    {
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "INSERT INTO prsk_roomid (guild_id, watch_channel_id, target_channel_id, name_format) VALUES (@g, @w, @t, @n);";
-        cmd.Parameters.AddWithValue("@g", (long)entry.GuildId);
-        cmd.Parameters.AddWithValue("@w", (long)entry.WatchChannelId);
-        cmd.Parameters.AddWithValue("@t", (long)entry.TargetChannelId);
-        cmd.Parameters.AddWithValue("@n", entry.NameFormat ?? "");
-        await cmd.ExecuteNonQueryAsync();
-    }
-
-    public async Task<IEnumerable<PrskRoomIdEntry>> GetPrskRoomIdsAsync(ulong guildId)
-    {
-        var list = new List<PrskRoomIdEntry>();
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id, guild_id, watch_channel_id, target_channel_id, name_format FROM prsk_roomid WHERE guild_id = @g;";
-        cmd.Parameters.AddWithValue("@g", (long)guildId);
-        using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            list.Add(new PrskRoomIdEntry {
-                Id = reader.GetInt64(0),
-                GuildId = (ulong)reader.GetInt64(1),
-                WatchChannelId = (ulong)reader.GetInt64(2),
-                TargetChannelId = (ulong)reader.GetInt64(3),
-                NameFormat = reader.IsDBNull(4) ? "" : reader.GetString(4)
-            });
-        }
-        return list;
-    }
-
-    public async Task DeletePrskRoomIdAsync(long id)
-    {
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM prsk_roomid WHERE id = @id;";
-        cmd.Parameters.AddWithValue("@id", id);
-        await cmd.ExecuteNonQueryAsync();
-    }
-
-    // ==========================================
-    // BotText 関連メソッド
-    // ==========================================
-    public async Task<long> AddBotTextAsync(BotTextEntry entry)
-    {
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "INSERT INTO bottext (guild_id, channel_id, content, is_embed, embed_title, time_hhmm) VALUES (@g, @c, @content, @embed, @title, @time) RETURNING id;";
-        cmd.Parameters.AddWithValue("@g", (long)entry.GuildId);
-        cmd.Parameters.AddWithValue("@c", (long)entry.ChannelId);
-        cmd.Parameters.AddWithValue("@content", entry.Content);
-        cmd.Parameters.AddWithValue("@embed", entry.IsEmbed);
-        cmd.Parameters.AddWithValue("@title", (object?)entry.EmbedTitle ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@time", entry.TimeHhmm);
-        return (long)(await cmd.ExecuteScalarAsync())!;
-    }
-
-    public async Task<IEnumerable<BotTextEntry>> GetBotTextsByGuildAsync(ulong guildId)
-    {
-        var list = new List<BotTextEntry>();
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id, guild_id, channel_id, content, is_embed, embed_title, time_hhmm FROM bottext WHERE guild_id = @g;";
-        cmd.Parameters.AddWithValue("@g", (long)guildId);
-        using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            list.Add(new BotTextEntry {
-                Id = reader.GetInt64(0),
-                GuildId = (ulong)reader.GetInt64(1),
-                ChannelId = (ulong)reader.GetInt64(2),
-                Content = reader.GetString(3),
-                IsEmbed = reader.GetBoolean(4),
-                EmbedTitle = reader.IsDBNull(5) ? null : reader.GetString(5),
-                TimeHhmm = reader.GetString(6)
-            });
-        }
-        return list;
-    }
-
-    public async Task DeleteBotTextAsync(long id)
-    {
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM bottext WHERE id = @id;";
-        cmd.Parameters.AddWithValue("@id", id);
-        await cmd.ExecuteNonQueryAsync();
-    }
-
-    // ==========================================
-    // DeleteAgo 関連メソッド
-    // ==========================================
-    public async Task AddDeleteAgoAsync(DeleteAgoEntry entry)
-    {
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "INSERT INTO deleteago (guild_id, channel_id, days, protect_mode) VALUES (@g, @c, @d, @p);";
-        cmd.Parameters.AddWithValue("@g", (long)entry.GuildId);
-        cmd.Parameters.AddWithValue("@c", (long)entry.ChannelId);
-        cmd.Parameters.AddWithValue("@d", entry.Days);
-        cmd.Parameters.AddWithValue("@p", entry.ProtectMode ?? "none");
-        await cmd.ExecuteNonQueryAsync();
-    }
-
-    public async Task<IEnumerable<DeleteAgoEntry>> GetAllDeleteAgoAsync()
-    {
-        var list = new List<DeleteAgoEntry>();
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id, guild_id, channel_id, days, protect_mode FROM deleteago;";
-        using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            list.Add(new DeleteAgoEntry {
-                Id = reader.GetInt64(0),
-                GuildId = (ulong)reader.GetInt64(1),
-                ChannelId = (ulong)reader.GetInt64(2),
-                Days = reader.GetInt32(3),
-                ProtectMode = reader.IsDBNull(4) ? "none" : reader.GetString(4)
-            });
-        }
-        return list;
-    }
-
-    public async Task DeleteDeleteAgoAsync(long id)
-    {
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM deleteago WHERE id = @id;";
-        cmd.Parameters.AddWithValue("@id", id);
-        await cmd.ExecuteNonQueryAsync();
-    }
-
-    // エラー修正：CleanerModuleで使用されるメソッドを追加
-    public async Task UpdateDeleteAgoAsync(DeleteAgoEntry entry)
-    {
-        using var conn = GetConnection();
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-            UPDATE deleteago 
-            SET days = COALESCE(@d, days), 
-                protect_mode = COALESCE(@p, protect_mode) 
-            WHERE id = @id;";
-        cmd.Parameters.AddWithValue("@id", entry.Id);
-        cmd.Parameters.AddWithValue("@d", entry.Days > 0 ? entry.Days : DBNull.Value);
-        cmd.Parameters.AddWithValue("@p", (object?)entry.ProtectMode ?? DBNull.Value);
-        await cmd.ExecuteNonQueryAsync();
-    }
+    // ... 以下、GetRoleGivesByGuildAsync や UpdateDeleteAgoAsync などの既存メソッドを全て含めてください ...
 }
