@@ -6,40 +6,45 @@ public static class DbConfig
 {
     public static string GetConnectionString()
     {
-        // 1. 公開用URLを最優先で取得
+        // 1. 公開用URLを優先的にチェック
         var url = Environment.GetEnvironmentVariable("DATABASE_PUBLIC_URL") 
                   ?? Environment.GetEnvironmentVariable("DATABASE_URL");
 
         if (string.IsNullOrEmpty(url))
         {
-            throw new Exception("接続用URL(DATABASE_PUBLIC_URL)が見つかりません。");
+            throw new Exception("DATABASE_PUBLIC_URL または DATABASE_URL が設定されていません。");
         }
 
-        // 2. Npgsqlが直接解釈できる「Host=...」形式に強制変換
-        // パスワードに含まれる可能性のある特殊文字に強い解析を行います
         try
         {
-            // postgresql:// を除去
+            // 2. postgresql:// 形式を解析
+            // Uriクラスはパスワードに特殊記号があると失敗しやすいため、文字列操作で確実に抽出します
             var cleanUrl = url.Replace("postgresql://", "").Replace("postgres://", "");
             
-            // user:pass と host:port/db を分離
-            var atSplit = cleanUrl.Split('@');
-            var userPass = atSplit[0].Split(':');
-            var hostPortDb = atSplit[1].Split('/');
-            var hostPort = hostPortDb[0].Split(':');
+            // ユーザー情報(@の前)とホスト情報(@の後)を分離
+            int atIndex = cleanUrl.LastIndexOf('@');
+            string userPart = cleanUrl.Substring(0, atIndex);
+            string hostPart = cleanUrl.Substring(atIndex + 1);
 
-            var user = userPass[0];
-            var pass = userPass[1];
-            var host = hostPort[0];
-            var port = hostPort[1];
-            var db = hostPortDb[1];
+            // ユーザー名とパスワードを分離
+            string[] userSplit = userPart.Split(':');
+            string user = userSplit[0];
+            string pass = userSplit.Length > 1 ? userSplit[1] : "";
 
-            // 3. Railwayで必須の SSL 設定を加えて返却
+            // ホスト、ポート、データベース名を分離
+            string[] hostSplit = hostPart.Split('/');
+            string[] hostAndPort = hostSplit[0].Split(':');
+            string host = hostAndPort[0];
+            string port = hostAndPort.Length > 1 ? hostAndPort[1] : "5432";
+            string db = hostSplit.Length > 1 ? hostSplit[1] : "railway";
+
+            // 3. Railwayで必須の SSL 設定を強制的に付与して返却
             return $"Host={host};Port={port};Database={db};Username={user};Password={pass};SSL Mode=Require;Trust Server Certificate=true;Pooling=true;";
         }
-        catch
+        catch (Exception ex)
         {
-            // 解析に失敗した場合は、SSL設定を末尾に足してそのまま投げる
+            // 解析に失敗した場合の予備策
+            Console.WriteLine($"DB URLの解析に失敗しました: {ex.Message}");
             return url.Contains("?") ? $"{url}&sslmode=Require" : $"{url}?sslmode=Require";
         }
     }
