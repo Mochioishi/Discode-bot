@@ -6,6 +6,7 @@ using System;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Linq;
 
 public class InteractionHandler
 {
@@ -19,27 +20,70 @@ public class InteractionHandler
         _handler = handler;
         _services = services;
 
-        // 全イベントの紐付け
+        // イベントの紐付け
         _client.Ready += ReadyAsync;
         _client.InteractionCreated += HandleInteraction;
-        _client.MessageReceived += HandleMessageReceivedAsync; // プロセカ監視
-        _client.ReactionAdded += HandleReactionAddedAsync;     // ロール付与
-        _client.ReactionRemoved += HandleReactionRemovedAsync; // ロール剥奪
+        _client.MessageReceived += HandleMessageReceivedAsync;
+        _client.ReactionAdded += HandleReactionAddedAsync;
+        _client.ReactionRemoved += HandleReactionRemovedAsync;
     }
 
-    private string GetConn() => Environment.GetEnvironmentVariable("DATABASE_URL") ?? "Host=localhost;Username=postgres;Password=password;Database=discord_bot";
+    // RailwayのDATABASE_URLをパースする共通メソッド
+    private string GetConn()
+    {
+        var url = Environment.GetEnvironmentVariable("DATABASE_URL");
+        if (string.IsNullOrEmpty(url)) return "Host=localhost;Username=postgres;Password=password;Database=discord_bot";
+
+        var uri = new Uri(url);
+        var userInfo = uri.UserInfo.Split(':');
+
+        return new NpgsqlConnectionStringBuilder
+        {
+            Host = uri.Host,
+            Port = uri.Port,
+            Username = userInfo[0],
+            Password = userInfo[1],
+            Database = uri.LocalPath.TrimStart('/'),
+            SslMode = SslMode.Require,
+            TrustServerCertificate = true
+        }.ToString();
+    }
 
     private async Task ReadyAsync()
     {
+        // モジュールの読み込み
         await _handler.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
-        await _handler.RegisterCommandsGloballyAsync();
-        Console.WriteLine("Commands & Events Initialized.");
+
+        // すべての接続済みギルドに対してコマンドを登録（ギルドコマンド仕様）
+        foreach (var guild in _client.Guilds)
+        {
+            try
+            {
+                await _handler.RegisterCommandsToGuildAsync(guild.Id);
+                Console.WriteLine($"[Command] Registered to guild: {guild.Name} ({guild.Id})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Error] Could not register to guild {guild.Id}: {ex.Message}");
+            }
+        }
+
+        Console.WriteLine("Bot is ready and Guild Commands are synchronized.");
     }
 
     private async Task HandleInteraction(SocketInteraction interaction)
     {
-        var context = new SocketInteractionContext(_client, interaction);
-        await _handler.ExecuteCommandAsync(context, _services);
+        try
+        {
+            var context = new SocketInteractionContext(_client, interaction);
+            await _handler.ExecuteCommandAsync(context, _services);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Interaction Error] {ex}");
+            if (interaction.Type == InteractionType.ApplicationCommand)
+                await interaction.GetOriginalResponseAsync().ContinueWith(async (msg) => await interaction.FollowupAsync("エラーが発生しました。"));
+        }
     }
 
     // --- 1. プロセカ部屋番号監視 ---
@@ -63,8 +107,9 @@ public class InteractionHandler
 
                 if (await _client.GetChannelAsync(targetId) is ITextChannel targetChannel)
                 {
-                    await targetChannel.ModifyAsync(x => x.Name = template.Replace("【roomid】", match.Value));
+                    // 🐾 リアクションを付けてから名前変更
                     await message.AddReactionAsync(new Emoji("🐾"));
+                    await targetChannel.ModifyAsync(x => x.Name = template.Replace("【roomid】", match.Value));
                 }
             }
         }
@@ -93,7 +138,6 @@ public class InteractionHandler
     // --- 3. リアクションロール (剥奪) ---
     private async Task HandleReactionRemovedAsync(Cacheable<IUserMessage, ulong> cachedMsg, Cacheable<IMessageChannel, ulong> cachedCh, SocketReaction reaction)
     {
-        // ユーザーがオフライン等でキャッシュにない場合、取得を試みる
         var user = reaction.User.IsSpecified ? reaction.User.Value : await _client.GetUserAsync(reaction.UserId);
         if (user == null || user.IsBot) return;
 
@@ -106,10 +150,12 @@ public class InteractionHandler
         var result = await cmd.ExecuteScalarAsync();
         if (result != null)
         {
-            var guild = (reaction.Channel as SocketGuildChannel)?.Guild;
-            var guildUser = guild?.GetUser(reaction.UserId);
-            var roleId = ulong.Parse(result.ToString());
-            await guildUser?.RemoveRoleAsync(roleId);
+            if (reaction.Channel is SocketGuildChannel guildChannel)
+            {
+                var guildUser = guildChannel.Guild.GetUser(reaction.UserId);
+                var roleId = ulong.Parse(result.ToString());
+                await guildUser?.RemoveRoleAsync(roleId);
+            }
         }
     }
 }
