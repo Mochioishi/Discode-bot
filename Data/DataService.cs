@@ -13,7 +13,8 @@ public class DataService
 
     public DataService(IConfiguration config)
     {
-        // 重要：新しく作成した DbConfig から、解析済みの接続文字列を取得します
+        // 重要：DbConfig.cs で DATABASE_PUBLIC_URL を解析・正規化した文字列を取得します
+        // これにより、Railway側で PGUSER 等が残っていても正しく DATABASE_PUBLIC_URL の値を使います
         _connectionString = DbConfig.GetConnectionString();
     }
 
@@ -26,7 +27,8 @@ public class DataService
     public async Task EnsureTablesAsync()
     {
         using var conn = GetConnection();
-        await conn.OpenAsync();
+        // ここが 29 行目付近です。正しいパスワードが渡されれば正常に Open されます。
+        await conn.OpenAsync(); 
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
