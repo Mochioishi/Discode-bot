@@ -8,15 +8,12 @@ public class DataService
 {
     private readonly string _connectionString;
 
-    // テストや拡張性を考慮した接続ファクトリ
     public Func<NpgsqlConnection> ConnectionFactory { get; set; }
 
     public DataService(IConfiguration config)
     {
-        // 1. DbConfig.cs のロジックを使用して、DATABASE_PUBLIC_URL 等から
-        // 正しく整形・SSL設定された接続文字列を取得します。
+        // DbConfig.cs から正規化された接続文字列を取得
         _connectionString = DbConfig.GetConnectionString();
-        
         ConnectionFactory = () => new NpgsqlConnection(_connectionString);
     }
 
@@ -28,8 +25,6 @@ public class DataService
     public async Task EnsureTablesAsync()
     {
         using var conn = GetConnection();
-        // ここが 31 行目付近です。
-        // DbConfig が生成したパスワードを含む正しい文字列であれば、ここで認証に成功します。
         await conn.OpenAsync(); 
 
         using var cmd = conn.CreateCommand();
@@ -42,7 +37,6 @@ public class DataService
                 role_id BIGINT NOT NULL,
                 emoji TEXT NOT NULL
             );
-
             CREATE TABLE IF NOT EXISTS prsk_roomid (
                 id SERIAL PRIMARY KEY,
                 guild_id BIGINT NOT NULL,
@@ -50,7 +44,6 @@ public class DataService
                 target_channel_id BIGINT NOT NULL,
                 name_format TEXT NOT NULL
             );
-
             CREATE TABLE IF NOT EXISTS bottext (
                 id SERIAL PRIMARY KEY,
                 guild_id BIGINT NOT NULL,
@@ -60,7 +53,6 @@ public class DataService
                 embed_title TEXT NULL,
                 time_hhmm TEXT NOT NULL
             );
-
             CREATE TABLE IF NOT EXISTS deleteago (
                 id SERIAL PRIMARY KEY,
                 guild_id BIGINT NOT NULL,
@@ -111,6 +103,31 @@ public class DataService
             });
         }
         return list;
+    }
+
+    // エラー修正：RoleModuleで使用されるメソッドを追加
+    public async Task<RoleGiveEntry?> GetRoleGiveByMessageAsync(ulong guildId, ulong channelId, ulong messageId)
+    {
+        using var conn = GetConnection();
+        await conn.OpenAsync();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT id, guild_id, channel_id, message_id, role_id, emoji FROM rolegive WHERE guild_id = @g AND channel_id = @c AND message_id = @m;";
+        cmd.Parameters.AddWithValue("@g", (long)guildId);
+        cmd.Parameters.AddWithValue("@c", (long)channelId);
+        cmd.Parameters.AddWithValue("@m", (long)messageId);
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            return new RoleGiveEntry {
+                Id = reader.GetInt64(0),
+                GuildId = (ulong)reader.GetInt64(1),
+                ChannelId = (ulong)reader.GetInt64(2),
+                MessageId = (ulong)reader.GetInt64(3),
+                RoleId = (ulong)reader.GetInt64(4),
+                Emoji = reader.GetString(5)
+            };
+        }
+        return null;
     }
 
     public async Task DeleteRoleGiveAsync(long id)
@@ -269,6 +286,23 @@ public class DataService
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM deleteago WHERE id = @id;";
         cmd.Parameters.AddWithValue("@id", id);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    // エラー修正：CleanerModuleで使用されるメソッドを追加
+    public async Task UpdateDeleteAgoAsync(DeleteAgoEntry entry)
+    {
+        using var conn = GetConnection();
+        await conn.OpenAsync();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            UPDATE deleteago 
+            SET days = COALESCE(@d, days), 
+                protect_mode = COALESCE(@p, protect_mode) 
+            WHERE id = @id;";
+        cmd.Parameters.AddWithValue("@id", entry.Id);
+        cmd.Parameters.AddWithValue("@d", entry.Days > 0 ? entry.Days : DBNull.Value);
+        cmd.Parameters.AddWithValue("@p", (object?)entry.ProtectMode ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
     }
 }
