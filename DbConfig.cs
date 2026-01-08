@@ -6,17 +6,28 @@ public static class DbConfig
     public static string GetConnectionString()
     {
         var url = Environment.GetEnvironmentVariable("DATABASE_URL");
-        if (string.IsNullOrEmpty(url)) throw new Exception("DATABASE_URL is not set.");
+        
+        // URLが空、または "postgresql://" で始まらない場合は、安全のために空文字を返す
+        if (string.IsNullOrEmpty(url) || !url.StartsWith("postgresql://"))
+        {
+            Console.WriteLine("[Critical] DATABASE_URL is invalid or missing.");
+            return ""; 
+        }
 
-        // 【重要】手動でパース（分割）せず、ライブラリに任せる
-        // これにより、パスワードに記号が含まれていても自動で正しく処理されます
-        var builder = new NpgsqlConnectionStringBuilder(url);
-
-        // Railway内部ネットワークでの接続安定化
-        builder.SslMode = SslMode.Disable; 
-        builder.TrustServerCertificate = true;
-        builder.Pooling = true;
-
-        return builder.ToString();
+        try
+        {
+            var builder = new NpgsqlConnectionStringBuilder(url)
+            {
+                SslMode = SslMode.Disable,
+                TrustServerCertificate = true,
+                Pooling = true
+            };
+            return builder.ToString();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Critical] Failed to parse DATABASE_URL: {ex.Message}");
+            return ""; // パースに失敗しても、プログラムを落とさないために空文字を返す
+        }
     }
 }
