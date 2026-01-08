@@ -1,160 +1,143 @@
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
+using DiscordBot.Modules;
 using Npgsql;
 using System;
 using System.Reflection;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using System.Linq;
 
-public class InteractionHandler
+namespace DiscordBot.Services
 {
-    private readonly DiscordSocketClient _client;
-    private readonly InteractionService _handler;
-    private readonly IServiceProvider _services;
-
-    public InteractionHandler(DiscordSocketClient client, InteractionService handler, IServiceProvider services)
+    public class InteractionHandler
     {
-        _client = client;
-        _handler = handler;
-        _services = services;
+        private readonly DiscordSocketClient _client;
+        private readonly InteractionService _handler;
+        private readonly IServiceProvider _services;
+        private readonly string _connectionString;
 
-        // イベントの紐付け
-        _client.Ready += ReadyAsync;
-        _client.InteractionCreated += HandleInteraction;
-        _client.MessageReceived += HandleMessageReceivedAsync;
-        _client.ReactionAdded += HandleReactionAddedAsync;
-        _client.ReactionRemoved += HandleReactionRemovedAsync;
-    }
-
-    // RailwayのDATABASE_URLをパースする共通メソッド
-    private string GetConn()
-    {
-        var url = Environment.GetEnvironmentVariable("DATABASE_URL");
-        if (string.IsNullOrEmpty(url)) return "Host=localhost;Username=postgres;Password=password;Database=discord_bot";
-
-        var uri = new Uri(url);
-        var userInfo = uri.UserInfo.Split(':');
-
-        return new NpgsqlConnectionStringBuilder
+        public InteractionHandler(DiscordSocketClient client, InteractionService handler, IServiceProvider services)
         {
-            Host = uri.Host,
-            Port = uri.Port,
-            Username = userInfo[0],
-            Password = userInfo[1],
-            Database = uri.LocalPath.TrimStart('/'),
-            SslMode = SslMode.Require,
-            TrustServerCertificate = true
-        }.ToString();
-    }
+            _client = client;
+            _handler = handler;
+            _services = services;
+            _connectionString = DbConfig.GetConnectionString();
 
-    private async Task ReadyAsync()
-    {
-        // モジュールの読み込み
-        await _handler.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
+            _client.InteractionCreated += HandleInteraction;
+            _client.ReactionAdded += HandleReactionAdded;
+            _client.ReactionRemoved += HandleReactionRemoved;
+        }
 
-        // すべての接続済みギルドに対してコマンドを登録（ギルドコマンド仕様）
-        foreach (var guild in _client.Guilds)
+        public async Task InitializeAsync()
+        {
+            await _handler.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
+        }
+
+        private async Task HandleInteraction(SocketInteraction interaction)
         {
             try
             {
-                await _handler.RegisterCommandsToGuildAsync(guild.Id);
-                Console.WriteLine($"[Command] Registered to guild: {guild.Name} ({guild.Id})");
+                var context = new SocketInteractionContext(_client, interaction);
+                await _handler.ExecuteCommandAsync(context, _services);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Error] Could not register to guild {guild.Id}: {ex.Message}");
+                Console.WriteLine(ex);
             }
         }
 
-        Console.WriteLine("Bot is ready and Guild Commands are synchronized.");
-    }
-
-    private async Task HandleInteraction(SocketInteraction interaction)
-    {
-        try
+        private async Task HandleReactionAdded(Cacheable<IUserMessage, ulong> cachedMessage, Cacheable<IMessageChannel, ulong> channel, SocketReaction reaction)
         {
-            var context = new SocketInteractionContext(_client, interaction);
-            await _handler.ExecuteCommandAsync(context, _services);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[Interaction Error] {ex}");
-            if (interaction.Type == InteractionType.ApplicationCommand)
-                await interaction.GetOriginalResponseAsync().ContinueWith(async (msg) => await interaction.FollowupAsync("エラーが発生しました。"));
-        }
-    }
+            if (reaction.User.Value.IsBot) return;
 
-    // --- 1. プロセカ部屋番号監視 ---
-    private async Task HandleMessageReceivedAsync(SocketMessage rawMessage)
-    {
-        if (rawMessage is not SocketUserMessage message || message.Author.IsBot) return;
-
-        var match = Regex.Match(message.Content, @"\b\d{5,6}\b");
-        if (match.Success)
-        {
-            using var conn = new NpgsqlConnection(GetConn());
-            await conn.OpenAsync();
-            using var cmd = new NpgsqlCommand("SELECT target_channel_id, original_name FROM prsk_settings WHERE monitor_channel_id = @mid", conn);
-            cmd.Parameters.AddWithValue("mid", message.Channel.Id.ToString());
-
-            using var reader = await cmd.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
+            // --- 1. リアクションロールの設定モード中かチェック ---
+            if (RoleModule.PendingSettings.TryRemove(reaction.UserId, out var role))
             {
-                var targetId = ulong.Parse(reader.GetString(0));
-                var template = reader.GetString(1);
-
-                if (await _client.GetChannelAsync(targetId) is ITextChannel targetChannel)
+                try
                 {
-                    // 🐾 リアクションを付けてから名前変更
-                    await message.AddReactionAsync(new Emoji("🐾"));
-                    await targetChannel.ModifyAsync(x => x.Name = template.Replace("【roomid】", match.Value));
+                    using var conn = new NpgsqlConnection(_connectionString);
+                    await conn.OpenAsync();
+                    using var cmd = new NpgsqlCommand(
+                        "INSERT INTO ReactionRoles (MessageId, Emoji, RoleId) VALUES (@mid, @emoji, @rid) " +
+                        "ON CONFLICT (MessageId, Emoji) DO UPDATE SET RoleId = @rid", conn);
+
+                    cmd.Parameters.AddWithValue("mid", (long)reaction.MessageId);
+                    cmd.Parameters.AddWithValue("emoji", reaction.Emote.ToString() ?? "");
+                    cmd.Parameters.AddWithValue("rid", (long)role.Id);
+                    await cmd.ExecuteNonQueryAsync();
+
+                    // ボットもリアクションして設定完了を通知
+                    var msg = await reaction.Channel.GetMessageAsync(reaction.MessageId);
+                    if (msg is IUserMessage userMsg)
+                    {
+                        await userMsg.AddReactionAsync(reaction.Emote);
+                    }
+                    return; // 設定処理が終わったのでここで終了
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DB Error] {ex.Message}");
                 }
             }
-        }
-    }
 
-    // --- 2. リアクションロール (付与) ---
-    private async Task HandleReactionAddedAsync(Cacheable<IUserMessage, ulong> cachedMsg, Cacheable<IMessageChannel, ulong> cachedCh, SocketReaction reaction)
-    {
-        if (reaction.User.Value.IsBot) return;
-
-        using var conn = new NpgsqlConnection(GetConn());
-        await conn.OpenAsync();
-        using var cmd = new NpgsqlCommand("SELECT role_id FROM reaction_roles WHERE message_id = @mid AND emoji_name = @ename", conn);
-        cmd.Parameters.AddWithValue("mid", reaction.MessageId.ToString());
-        cmd.Parameters.AddWithValue("ename", reaction.Emote.ToString());
-
-        var result = await cmd.ExecuteScalarAsync();
-        if (result != null)
-        {
-            var guildUser = reaction.User.Value as IGuildUser;
-            var roleId = ulong.Parse(result.ToString());
-            await guildUser?.AddRoleAsync(roleId);
-        }
-    }
-
-    // --- 3. リアクションロール (剥奪) ---
-    private async Task HandleReactionRemovedAsync(Cacheable<IUserMessage, ulong> cachedMsg, Cacheable<IMessageChannel, ulong> cachedCh, SocketReaction reaction)
-    {
-        var user = reaction.User.IsSpecified ? reaction.User.Value : await _client.GetUserAsync(reaction.UserId);
-        if (user == null || user.IsBot) return;
-
-        using var conn = new NpgsqlConnection(GetConn());
-        await conn.OpenAsync();
-        using var cmd = new NpgsqlCommand("SELECT role_id FROM reaction_roles WHERE message_id = @mid AND emoji_name = @ename", conn);
-        cmd.Parameters.AddWithValue("mid", reaction.MessageId.ToString());
-        cmd.Parameters.AddWithValue("ename", reaction.Emote.ToString());
-
-        var result = await cmd.ExecuteScalarAsync();
-        if (result != null)
-        {
-            if (reaction.Channel is SocketGuildChannel guildChannel)
+            // --- 2. 通常のロール付与ロジック ---
+            try
             {
-                var guildUser = guildChannel.Guild.GetUser(reaction.UserId);
-                var roleId = ulong.Parse(result.ToString());
-                await guildUser?.RemoveRoleAsync(roleId);
+                using var conn = new NpgsqlConnection(_connectionString);
+                await conn.OpenAsync();
+                using var cmd = new NpgsqlCommand("SELECT RoleId FROM ReactionRoles WHERE MessageId = @mid AND Emoji = @emoji", conn);
+                cmd.Parameters.AddWithValue("mid", (long)reaction.MessageId);
+                cmd.Parameters.AddWithValue("emoji", reaction.Emote.ToString() ?? "");
+
+                var result = await cmd.ExecuteScalarAsync();
+                if (result != null)
+                {
+                    var roleId = (ulong)(long)result;
+                    var guild = (reaction.Channel as SocketGuildChannel)?.Guild;
+                    var user = guild?.GetUser(reaction.UserId);
+                    var targetRole = guild?.GetRole(roleId);
+
+                    if (user != null && targetRole != null)
+                    {
+                        await user.AddRoleAsync(targetRole);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
+            }
+        }
+
+        private async Task HandleReactionRemoved(Cacheable<IUserMessage, ulong> cachedMessage, Cacheable<IMessageChannel, ulong> channel, SocketReaction reaction)
+        {
+            if (reaction.User.Value.IsBot) return;
+
+            try
+            {
+                using var conn = new NpgsqlConnection(_connectionString);
+                await conn.OpenAsync();
+                using var cmd = new NpgsqlCommand("SELECT RoleId FROM ReactionRoles WHERE MessageId = @mid AND Emoji = @emoji", conn);
+                cmd.Parameters.AddWithValue("mid", (long)reaction.MessageId);
+                cmd.Parameters.AddWithValue("emoji", reaction.Emote.ToString() ?? "");
+
+                var result = await cmd.ExecuteScalarAsync();
+                if (result != null)
+                {
+                    var roleId = (ulong)(long)result;
+                    var guild = (reaction.Channel as SocketGuildChannel)?.Guild;
+                    var user = guild?.GetUser(reaction.UserId);
+                    var targetRole = guild?.GetRole(roleId);
+
+                    if (user != null && targetRole != null)
+                    {
+                        await user.RemoveRoleAsync(targetRole);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
             }
         }
     }
