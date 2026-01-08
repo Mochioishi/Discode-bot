@@ -14,7 +14,8 @@ public class Worker : BackgroundService
     public Worker(DiscordSocketClient client)
     {
         _client = client;
-        _connectionString = DatabaseConfig.GetConnectionString();
+        // DatabaseConfig を DbConfig に修正
+        _connectionString = DbConfig.GetConnectionString();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -28,7 +29,6 @@ public class Worker : BackgroundService
 
                 var now = DateTimeOffset.UtcNow;
                 
-                // 引用符を追加したクエリ
                 var selectSql = @"
                     SELECT ""MessageId"", ""ChannelId"" 
                     FROM ""ScheduledDeletions"" 
@@ -54,7 +54,6 @@ public class Worker : BackgroundService
                         }
                     }
 
-                    // 削除後にDBからも消す
                     using var deleteConn = new NpgsqlConnection(_connectionString);
                     await deleteConn.OpenAsync();
                     var deleteSql = @"DELETE FROM ""ScheduledDeletions"" WHERE ""MessageId"" = @MsgId";
