@@ -22,7 +22,7 @@ namespace DiscordBot.Workers
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await Task.Delay(5000, stoppingToken);
+            await Task.Delay(500000, stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
