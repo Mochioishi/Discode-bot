@@ -1,35 +1,44 @@
 using Discord;
 using Discord.Interactions;
+using Npgsql;
 using System;
-using System.Collections.Concurrent;
 using System.Threading.Tasks;
 
-namespace DiscordBot.Modules
+public class RoleModule : InteractionModuleBase<SocketInteractionContext>
 {
-    public class RoleModule : InteractionModuleBase<SocketInteractionContext>
+    private readonly string _connectionString;
+
+    public RoleModule()
     {
-        // ユーザーIDと設定したいロールの紐付けを一時保持
-        public static readonly ConcurrentDictionary<ulong, IRole> PendingSettings = new();
+        _connectionString = DatabaseConfig.GetConnectionString();
+    }
 
-        [SlashCommand("rolegive", "ロールを選択後、対象のメッセージにリアクションして設定を完了させます")]
-        public async Task SetRoleCommand([Summary("role", "付与したいロール")] IRole role)
-        {
-            var userId = Context.User.Id;
-            PendingSettings[userId] = role;
+    [SlashCommand("rolegive", "メッセージを送信してリアクションでロールを付与します")]
+    public async Task RoleGive(string text, IRole role, int minutes = 60)
+    {
+        var embed = new EmbedBuilder()
+            .WithDescription(text)
+            .WithColor(Color.Blue)
+            .Build();
 
-            await RespondAsync(
-                $"【設定モード開始】\n1. 付与したいロール: **{role.Name}**\n" +
-                $"2. 設定したいメッセージに、**絵文字でリアクション**してください。\n" +
-                $"※ 1分間有効です。ボットが反応すれば設定完了です。", 
-                ephemeral: true);
+        await RespondAsync(embed: embed);
+        var message = await GetOriginalResponseAsync();
+        await message.AddReactionAsync(new Emoji("✅"));
 
-            // 1分後に自動削除
-            // エラーを避けるため、引数の型を明示的に指定します
-            _ = Task.Delay(60000).ContinueWith((Task t) => 
-            {
-                // 「out _」ではなく、型を明示して取り出す形にします
-                PendingSettings.TryRemove(userId, out IRole? removedRole);
-            });
-        }
+        // DBに削除予定を保存
+        using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var insertSql = @"
+            INSERT INTO ""ScheduledDeletions"" (""MessageId"", ""ChannelId"", ""DeleteAt"") 
+            VALUES (@MsgId, @ChId, @Time)
+            ON CONFLICT (""MessageId"") DO NOTHING";
+
+        using var command = new NpgsqlCommand(insertSql, connection);
+        command.Parameters.AddWithValue("MsgId", (long)message.Id);
+        command.Parameters.AddWithValue("ChId", (long)Context.Channel.Id);
+        command.Parameters.AddWithValue("Time", DateTimeOffset.UtcNow.AddMinutes(minutes));
+
+        await command.ExecuteNonQueryAsync();
     }
 }
