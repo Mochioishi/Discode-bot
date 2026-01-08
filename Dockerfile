@@ -2,12 +2,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-env
 WORKDIR /app
 
-# すべてのファイルをビルドコンテナにコピー
+# すべてのファイルをコピー
 COPY . ./
 
-# プロジェクト名だけでビルド（パスをつけない）
-RUN dotnet restore Discord-bot.csproj
-RUN dotnet publish Discord-bot.csproj -c Release -o out
+# 直接ファイルを指定してリストアとビルド
+RUN dotnet restore "Discord-bot.csproj"
+RUN dotnet publish "Discord-bot.csproj" -c Release -o out
 
 # 実行環境
 FROM mcr.microsoft.com/dotnet/runtime:8.0
