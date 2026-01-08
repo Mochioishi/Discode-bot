@@ -13,7 +13,28 @@ namespace DiscordBot
     {
         public static async Task Main(string[] args)
         {
-            // 1. DB初期化
+            // 1. ホストの構築
+            using IHost host = Host.CreateDefaultBuilder(args)
+                .ConfigureServices((hostContext, services) =>
+                {
+                    var config = new DiscordSocketConfig
+                    {
+                        GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent | GatewayIntents.GuildMembers | GatewayIntents.GuildMessageReactions,
+                        AlwaysDownloadUsers = true
+                    };
+
+                    services.AddSingleton(new DiscordSocketClient(config));
+                    services.AddSingleton(x => new InteractionService(x.GetRequiredService<DiscordSocketClient>()));
+                    services.AddSingleton<InteractionHandler>();
+                    services.AddHostedService<TimeSignalWorker>();
+                })
+                // 【重要】これを入れることで、DBエラー(Workerの失敗)が起きてもBot自体は終了しなくなります
+                .ConfigureHostOptions(options => {
+                    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
+                })
+                .Build();
+
+            // 2. DB初期化（失敗しても次に進むようにtry-catchを維持）
             try
             {
                 DbInitializer.Initialize();
@@ -21,47 +42,24 @@ namespace DiscordBot
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"DB Initialization Error: {ex.Message}");
+                Console.WriteLine($"DB Initialization Error (Skipping for Startup): {ex.Message}");
             }
 
-            // 2. ホストの構築
-            using IHost host = Host.CreateDefaultBuilder(args)
-                .ConfigureServices((hostContext, services) =>
-                {
-                    var config = new DiscordSocketConfig
-                    {
-                        // メッセージ内容の読み取り、サーバーメンバー、リアクションに必要なインテント
-                        GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent | GatewayIntents.GuildMembers | GatewayIntents.GuildMessageReactions,
-                        AlwaysDownloadUsers = true
-                    };
-
-                    services.AddSingleton(new DiscordSocketClient(config));
-                    services.AddSingleton(x => new InteractionService(x.GetRequiredService<DiscordSocketClient>()));
-                    
-                    // InteractionHandlerをSingletonで登録
-                    services.AddSingleton<InteractionHandler>();
-                    
-                    // TimeSignalWorkerをバックグラウンドサービスとして登録
-                    services.AddHostedService<TimeSignalWorker>();
-                })
-                .Build();
-
-            // 3. 実行前のログイン処理 (ここが重要です)
+            // 3. ログイン処理
             var client = host.Services.GetRequiredService<DiscordSocketClient>();
-            var handler = host.Services.GetRequiredService<InteractionHandler>(); // ハンドラーをインスタンス化してイベント登録を有効化
+            var handler = host.Services.GetRequiredService<InteractionHandler>();
 
-            string token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
-
+            string? token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
             if (string.IsNullOrWhiteSpace(token))
             {
-                Console.WriteLine("Error: DISCORD_TOKEN is not set in environment variables.");
+                Console.WriteLine("Error: DISCORD_TOKEN is not set.");
                 return;
             }
 
             await client.LoginAsync(TokenType.Bot, token);
             await client.StartAsync();
 
-            // 4. ホストの開始
+            // 4. 実行
             await host.RunAsync();
         }
     }
