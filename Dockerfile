@@ -1,16 +1,21 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-env
+WORKDIR /src
+
+# リポジトリ全体をコピー
+COPY . .
+
+# csproj があるフォルダへ移動
+WORKDIR /src/Discord-bot
+
+# 依存関係を復元
+RUN dotnet restore "Discord-bot.csproj"
+
+# ビルド＆発行
+RUN dotnet publish "Discord-bot.csproj" -c Release -o /app
+
+# 実行用イメージ
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
-
-# 1. すべてのファイルをコピー
-COPY . ./
-
-# 2. 直接ファイルを指定してビルド（フォルダ名は書かない！）
-RUN dotnet restore Discord-bot.csproj
-RUN dotnet publish Discord-bot.csproj -c Release -o out
-
-# 3. 実行環境へ
-FROM mcr.microsoft.com/dotnet/runtime:8.0
-WORKDIR /app
-COPY --from=build-env /app/out .
+COPY --from=build-env /app .
 
 ENTRYPOINT ["dotnet", "Discord-bot.dll"]
