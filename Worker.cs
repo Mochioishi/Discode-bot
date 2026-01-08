@@ -14,12 +14,15 @@ public class Worker : BackgroundService
     public Worker(DiscordSocketClient client)
     {
         _client = client;
-        // DatabaseConfig を DbConfig に修正
         _connectionString = DbConfig.GetConnectionString();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Botが準備完了するまで少し待機
+        await Task.Delay(5000, stoppingToken);
+        Console.WriteLine("Worker active with TimeZone: Asia/Tokyo");
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -29,6 +32,7 @@ public class Worker : BackgroundService
 
                 var now = DateTimeOffset.UtcNow;
                 
+                // 大文字小文字を厳密に指定したクエリ
                 var selectSql = @"
                     SELECT ""MessageId"", ""ChannelId"" 
                     FROM ""ScheduledDeletions"" 
@@ -46,14 +50,19 @@ public class Worker : BackgroundService
                     var channel = _client.GetChannel(channelId) as ITextChannel;
                     if (channel != null)
                     {
-                        var message = await channel.GetMessageAsync(messageId);
-                        if (message != null)
-                        {
-                            await message.DeleteAsync();
-                            Console.WriteLine($"Deleted message {messageId}");
+                        try {
+                            var message = await channel.GetMessageAsync(messageId);
+                            if (message != null)
+                            {
+                                await message.DeleteAsync();
+                                Console.WriteLine($"Deleted message {messageId}");
+                            }
+                        } catch (Exception ex) {
+                            Console.WriteLine($"Message delete failed: {ex.Message}");
                         }
                     }
 
+                    // 処理後にDBから削除
                     using var deleteConn = new NpgsqlConnection(_connectionString);
                     await deleteConn.OpenAsync();
                     var deleteSql = @"DELETE FROM ""ScheduledDeletions"" WHERE ""MessageId"" = @MsgId";
