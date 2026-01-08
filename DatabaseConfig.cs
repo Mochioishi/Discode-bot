@@ -1,34 +1,31 @@
 using Npgsql;
 using System;
+using System.Threading.Tasks;
 
-public static class DatabaseConfig
+public class DatabaseInitializer
 {
-    public static string GetConnectionString()
+    private readonly string _connectionString;
+
+    public DatabaseInitializer(string connectionString)
     {
-        // Railwayの環境変数 DATABASE_URL を取得
-        var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+        _connectionString = connectionString;
+    }
 
-        if (string.IsNullOrEmpty(databaseUrl))
-        {
-            // ローカル開発用
-            return "Host=localhost;Username=postgres;Password=password;Database=discord_bot";
-        }
+    public async Task InitializeAsync()
+    {
+        using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync();
 
-        // すでに環境変数を Host=... の形式に設定しているため、パースせずそのまま使います
-        try
-        {
-            var builder = new NpgsqlConnectionStringBuilder(databaseUrl);
+        // テーブル名とカラム名を \" で囲むことで PostgreSQL の大文字小文字問題を回避
+        var sql = @"
+            CREATE TABLE IF NOT EXISTS ""ScheduledDeletions"" (
+                ""MessageId"" BIGINT PRIMARY KEY,
+                ""ChannelId"" BIGINT NOT NULL,
+                ""DeleteAt"" TIMESTAMP WITH TIME ZONE NOT NULL
+            );";
 
-            // Railway内部接続用にSSLを無効化（これが一番安定します）
-            builder.SslMode = SslMode.Disable;
-            builder.TrustServerCertificate = true;
-
-            return builder.ToString();
-        }
-        catch
-        {
-            // もしパースに失敗しても、最低限そのまま返す
-            return databaseUrl;
-        }
+        using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
+        Console.WriteLine("Database tables initialized successfully.");
     }
 }
