@@ -1,35 +1,19 @@
-using Npgsql;
 using System;
 
 public static class DbConfig
 {
     public static string GetConnectionString()
     {
-        var url = Environment.GetEnvironmentVariable("DATABASE_URL");
-        if (string.IsNullOrEmpty(url)) return "";
-
-        try
+        // 余計なことは一切せず、環境変数をそのまま返す
+        // 解析は環境変数側（Railway側）で既に行われている前提にする
+        var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL");
+        
+        if (string.IsNullOrEmpty(connectionString))
         {
-            // URL形式(postgresql://)でもHost形式でも、一旦ビルダーに読み込ませる
-            var builder = new NpgsqlConnectionStringBuilder(url);
-
-            // 【重要】パスワードがもし空なら、直接環境変数から再セットを試みる
-            if (string.IsNullOrEmpty(builder.Password))
-            {
-                // ここはPostgres側の変数名に合わせています
-                builder.Password = Environment.GetEnvironmentVariable("PGPASSWORD");
-            }
-
-            // Railway内部接続用の安定設定
-            builder.SslMode = SslMode.Disable;
-            builder.TrustServerCertificate = true;
-
-            return builder.ToString();
+            Console.WriteLine("[DbConfig] Error: DATABASE_URL is null or empty.");
+            return "";
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[DbConfig Error] {ex.Message}");
-            return url; // 失敗したら元の文字列をそのまま返して勝負する
-        }
+
+        return connectionString;
     }
 }
