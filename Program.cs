@@ -7,6 +7,10 @@ using Microsoft.Extensions.Hosting;
 using System;
 using System.Threading.Tasks;
 
+// 提案したフォルダ構成に合わせた namespace の参照を追加
+using Discord_bot.Infrastructure;
+using Discord_bot.Workers;
+
 namespace DiscordBot
 {
     public class Program
@@ -26,28 +30,33 @@ namespace DiscordBot
                     services.AddSingleton(new DiscordSocketClient(config));
                     services.AddSingleton(x => new InteractionService(x.GetRequiredService<DiscordSocketClient>()));
                     services.AddSingleton<InteractionHandler>();
+                    
+                    // バックグラウンドサービス（Workers）の登録
                     services.AddHostedService<TimeSignalWorker>();
+                    services.AddHostedService<Worker>(); // 自動削除Workerも登録
                 })
-                // 【重要】これを入れることで、DBエラー(Workerの失敗)が起きてもBot自体は終了しなくなります
                 .ConfigureHostOptions(options => {
                     options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
                 })
                 .Build();
 
-            // 2. DB初期化（失敗しても次に進むようにtry-catchを維持）
+            // 2. DB初期化（Infrastructure フォルダ内の DbInitializer を使用）
             try
             {
                 DbInitializer.Initialize();
-                Console.WriteLine("Database initialized.");
+                Console.WriteLine("Database initialized successfully.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"DB Initialization Error (Skipping for Startup): {ex.Message}");
+                Console.WriteLine($"DB Initialization Error: {ex.Message}");
             }
 
             // 3. ログイン処理
             var client = host.Services.GetRequiredService<DiscordSocketClient>();
             var handler = host.Services.GetRequiredService<InteractionHandler>();
+
+            // コマンドハンドラーの初期化（スラッシュコマンドの登録など）
+            await handler.InitializeAsync();
 
             string? token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
             if (string.IsNullOrWhiteSpace(token))
