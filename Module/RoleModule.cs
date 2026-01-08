@@ -8,128 +8,74 @@ namespace DiscordBot.Modules
 {
     public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     {
-        private string GetConnectionString()
-        {
-            var url = Environment.GetEnvironmentVariable("DATABASE_URL");
-            if (string.IsNullOrEmpty(url)) return "Host=localhost;Username=postgres;Password=password;Database=discord_bot";
-            var uri = new Uri(url);
-            var userInfo = uri.UserInfo.Split(':');
-            return new NpgsqlConnectionStringBuilder
-            {
-                Host = uri.Host, Port = uri.Port, Username = userInfo[0], Password = userInfo[1],
-                Database = uri.LocalPath.TrimStart('/'), SslMode = SslMode.Require, TrustServerCertificate = true
-            }.ToString();
-        }
+        private readonly string _connectionString = Environment.GetEnvironmentVariable("DATABASE_URL") ?? "";
 
-        [SlashCommand("rolegive", "リアクションロールを設定します")]
-        public async Task SetReactionRole(
-            [Summary("message_id", "対象メッセージのID")] string messageId,
+        [SlashCommand("rolegive", "リアクションロール用のメッセージを送信します")]
+        public async Task SendRoleGiveMessage(
+            [Summary("emoji", "使用する絵文字")] string emojiStr,
             [Summary("role", "付与するロール")] IRole role,
-            [Summary("emoji", "使用する絵文字")] string emojiStr
-        )
+            [Summary("text", "表示するテキスト")] string text)
         {
-            // メッセージが存在するか確認
-            if (!ulong.TryParse(messageId, out var mid))
+            // 絵文字の解析
+            IEmote targetEmoji;
+            if (Emoji.TryParse(emojiStr, out var emoji))
             {
-                await RespondAsync("有効なメッセージIDを入力してください。", ephemeral: true);
+                targetEmoji = emoji;
+            }
+            else if (Emote.TryParse(emojiStr, out var emote))
+            {
+                targetEmoji = emote;
+            }
+            else
+            {
+                await RespondAsync("有効な絵文字を入力してください（標準絵文字またはカスタム絵文字）。", ephemeral: true);
                 return;
             }
 
-            var message = await Context.Channel.GetMessageAsync(mid);
-            if (message == null)
-            {
-                await RespondAsync("メッセージが見つかりませんでした。このチャンネル内のメッセージIDを指定してください。", ephemeral: true);
-                return;
-            }
+            // メッセージ送信
+            var message = await ReplyAsync($"{text}\n\nこのメッセージに {targetEmoji} でリアクションすると、{role.Mention} ロールが付与されます。");
+            await message.AddReactionAsync(targetEmoji);
 
-            // 絵文字のパース
-            if (!Emoji.TryParse(emojiStr, out var emoji) && !Emote.TryParse(emojiStr, out var emote))
+            // データベースに情報を保存
+            using (var conn = new NpgsqlConnection(_connectionString))
             {
-                await RespondAsync("有効な絵文字を入力してください。", ephemeral: true);
-                return;
-            }
-            IEmote targetEmoji = (IEmote)emoji ?? emote;
-
-            try
-            {
-                using var conn = new NpgsqlConnection(GetConnectionString());
                 await conn.OpenAsync();
-
-                // テーブル作成
-                using var createTableCmd = new NpgsqlCommand(@"
-                    CREATE TABLE IF NOT EXISTS reaction_roles (
-                        id SERIAL PRIMARY KEY,
-                        guild_id TEXT NOT NULL,
-                        message_id TEXT NOT NULL,
-                        role_id TEXT NOT NULL,
-                        emoji_name TEXT NOT NULL
-                    );", conn);
-                await createTableCmd.ExecuteNonQueryAsync();
-
-                // DB保存
-                using var cmd = new NpgsqlCommand(@"
-                    INSERT INTO reaction_roles (guild_id, message_id, role_id, emoji_name)
-                    VALUES (@gid, @mid, @rid, @ename)", conn);
-
-                cmd.Parameters.AddWithValue("gid", Context.Guild.Id.ToString());
-                cmd.Parameters.AddWithValue("mid", messageId);
-                cmd.Parameters.AddWithValue("rid", role.Id.ToString());
-                cmd.Parameters.AddWithValue("ename", targetEmoji.ToString());
-
-                await cmd.ExecuteNonQueryAsync();
-
-                // Botが対象メッセージにリアクションを付ける
-                await message.AddReactionAsync(targetEmoji);
-
-                await RespondAsync($"✅ リアクションロールを設定しました。\nロール: {role.Name}\n絵文字: {targetEmoji}", ephemeral: true);
+                using (var cmd = new NpgsqlCommand(
+                    "INSERT INTO ReactionRoles (MessageId, Emoji, RoleId) VALUES (@mid, @emoji, @rid)", conn))
+                {
+                    cmd.Parameters.AddWithValue("mid", (long)message.Id);
+                    cmd.Parameters.AddWithValue("emoji", targetEmoji.ToString() ?? "");
+                    cmd.Parameters.AddWithValue("rid", (long)role.Id);
+                    await cmd.ExecuteNonQueryAsync();
+                }
             }
-            catch (Exception ex)
-            {
-                await RespondAsync($"エラーが発生しました: {ex.Message}", ephemeral: true);
-            }
+
+            await RespondAsync("リアクションロールメッセージを作成しました。", ephemeral: true);
         }
 
-        [SlashCommand("rolegive_list", "設定されているリアクションロールの一覧を表示します")]
-        public async Task ListRoleGive()
+        [SlashCommand("roledelete", "指定したメッセージのリアクションロール設定を削除します")]
+        public async Task DeleteRoleSetting([Summary("messageid", "メッセージID")] string messageIdStr)
         {
-            using var conn = new NpgsqlConnection(GetConnectionString());
-            await conn.OpenAsync();
-
-            using var cmd = new NpgsqlCommand("SELECT id, message_id, role_id, emoji_name FROM reaction_roles WHERE guild_id = @gid", conn);
-            cmd.Parameters.AddWithValue("gid", Context.Guild.Id.ToString());
-
-            using var reader = await cmd.ExecuteReaderAsync();
-
-            var embed = new EmbedBuilder().WithTitle("🎭 リアクションロール設定一覧").WithColor(Color.Purple);
-            var component = new ComponentBuilder();
-            bool hasData = false;
-
-            while (await reader.ReadAsync())
+            if (!ulong.TryParse(messageIdStr, out var messageId))
             {
-                hasData = true;
-                var id = reader.GetInt32(0);
-                var mid = reader.GetString(1);
-                var rid = reader.GetString(2);
-                var ename = reader.GetString(3);
-
-                embed.AddField($"ID: {id}", $"メッセージ: {mid}\nロール: <@&{rid}>\n絵文字: {ename}");
-                component.WithButton($"削除 {id}", $"stop_role:{id}", ButtonStyle.Danger);
+                await RespondAsync("正しいメッセージIDを入力してください。", ephemeral: true);
+                return;
             }
 
-            if (!hasData) await RespondAsync("設定はありません。", ephemeral: true);
-            else await RespondAsync(embed: embed.Build(), components: component.Build(), ephemeral: true);
-        }
+            using (var conn = new NpgsqlConnection(_connectionString))
+            {
+                await conn.OpenAsync();
+                using (var cmd = new NpgsqlCommand("DELETE FROM ReactionRoles WHERE MessageId = @mid", conn))
+                {
+                    cmd.Parameters.AddWithValue("mid", (long)messageId);
+                    int rows = await cmd.ExecuteNonQueryAsync();
 
-        [ComponentInteraction("stop_role:*")]
-        public async Task StopRole(string id)
-        {
-            using var conn = new NpgsqlConnection(GetConnectionString());
-            await conn.OpenAsync();
-            using var cmd = new NpgsqlCommand("DELETE FROM reaction_roles WHERE id = @id", conn);
-            cmd.Parameters.AddWithValue("id", int.Parse(id));
-            await cmd.ExecuteNonQueryAsync();
-
-            await RespondAsync("設定を削除しました。", ephemeral: true);
+                    if (rows > 0)
+                        await RespondAsync("設定を削除しました。", ephemeral: true);
+                    else
+                        await RespondAsync("該当する設定が見つかりませんでした。", ephemeral: true);
+                }
+            }
         }
     }
 }
