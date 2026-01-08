@@ -3,6 +3,7 @@ using Discord.Interactions;
 using Npgsql;
 using System;
 using System.Threading.Tasks;
+using DiscordBot.Infrastructure;
 
 namespace DiscordBot.Modules
 {
