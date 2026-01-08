@@ -2,6 +2,7 @@ using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
 using DiscordBot.Modules;
+using DiscordBot.Infrastructure;
 using Npgsql;
 using System;
 using System.Reflection;
