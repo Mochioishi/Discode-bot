@@ -13,158 +13,106 @@ namespace DiscordBot.Services
     {
         private readonly DiscordSocketClient _client;
         private readonly string _connectionString;
-        private readonly TimeZoneInfo _jst;
+        private readonly string _targetChannelId;
+        private readonly TimeZoneInfo _tzi = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
 
         public TimeSignalWorker(DiscordSocketClient client)
         {
             _client = client;
-            _connectionString = GetConnectionString();
-            
-            var tzId = Environment.GetEnvironmentVariable("TIMEZONE") ?? "Asia/Tokyo";
-            _jst = TimeZoneInfo.FindSystemTimeZoneById(tzId);
-        }
-
-        private string GetConnectionString()
-        {
-            var url = Environment.GetEnvironmentVariable("DATABASE_URL");
-            if (string.IsNullOrEmpty(url)) return "Host=localhost;Username=postgres;Password=password;Database=discord_bot";
-            var uri = new Uri(url);
-            var userInfo = uri.UserInfo.Split(':');
-            return new NpgsqlConnectionStringBuilder
-            {
-                Host = uri.Host, Port = uri.Port, Username = userInfo[0], Password = userInfo[1],
-                Database = uri.LocalPath.TrimStart('/'), SslMode = SslMode.Require, TrustServerCertificate = true
-            }.ToString();
+            _connectionString = DbConfig.GetConnectionString();
+            _targetChannelId = Environment.GetEnvironmentVariable("TARGET_CHANNEL_ID") ?? "";
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            while (_client.LoginState != LoginState.LoggedIn) await Task.Delay(5000, stoppingToken);
-
-            Console.WriteLine("Worker active with TimeZone: Asia/Tokyo");
+            Console.WriteLine($"Worker active with TimeZone: Asia/Tokyo");
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                var nowJst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _jst);
-                string currentTime = nowJst.ToString("HHmm");
-                DayOfWeek today = nowJst.DayOfWeek;
+                var now = TimeZoneInfo.ConvertTime(DateTimeOffset.Now, _tzi);
+                var timeStr = now.ToString("HH:mm");
 
-                // --- 固定アラーム（平日のみ、削除・一覧化不可） ---
-                if (today != DayOfWeek.Saturday && today != DayOfWeek.Sunday)
+                // 平日（月〜金）のみ実行
+                if (now.DayOfWeek != DayOfWeek.Saturday && now.DayOfWeek != DayOfWeek.Sunday)
                 {
-                    if (currentTime == "0825" || currentTime == "1255" || currentTime == "1720")
+                    // 指定の時間にメッセージを送信
+                    if (timeStr == "08:25" || timeStr == "12:55" || timeStr == "17:20")
                     {
-                        await SendFixedAlarm();
+                        await SendAlarmAsync();
                     }
                 }
 
-                // 1. 予約投稿のチェック (毎分)
-                await ProcessScheduledMessages(currentTime);
+                // 毎分、期限切れメッセージをDBから確認して削除
+                await ProcessScheduledMessages(timeStr);
 
-                // 2. 自動削除のチェック (毎日 04:00)
-                if (currentTime == "0400")
-                {
-                    await ProcessAutoPurge();
-                }
-
-                // 次の00秒まで待機
-                await Task.Delay(60000 - (nowJst.Second * 1000), stoppingToken);
+                // 1分待機
+                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
             }
         }
 
-        // --- 固定アラーム送信ロジック ---
-        private async Task SendFixedAlarm()
+        private async Task SendAlarmAsync()
         {
-            var targetIdEnv = Environment.GetEnvironmentVariable("TARGET_CHANNEL_ID");
-            if (ulong.TryParse(targetIdEnv, out var channelId))
+            if (ulong.TryParse(_targetChannelId, out var channelId))
             {
-                if (await _client.GetChannelAsync(channelId) is ITextChannel channel)
+                var channel = _client.GetChannel(channelId) as IMessageChannel;
+                if (channel != null)
                 {
                     await channel.SendMessageAsync("🔆アラーム！");
                 }
             }
         }
 
-        // --- 予約投稿ロジック ---
         private async Task ProcessScheduledMessages(string time)
         {
-            using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
-            var messages = new List<ScheduledInfo>();
-
-            using (var cmd = new NpgsqlCommand("SELECT id, channel_id, content, is_embed, embed_title FROM scheduled_messages WHERE scheduled_time = @time", conn))
+            // ここがログの92行目付近です。
+            // try-catchで囲むことで、パスワードエラーが起きてもBotが終了するのを防ぎます。
+            try
             {
-                cmd.Parameters.AddWithValue("time", time);
-                using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    messages.Add(new ScheduledInfo {
-                        Id = reader.GetInt32(0), ChannelId = ulong.Parse(reader.GetString(1)),
-                        Content = reader.GetString(2), IsEmbed = reader.GetBoolean(3),
-                        Title = reader.IsDBNull(4) ? null : reader.GetString(4)
-                    });
-                }
-            }
+                using var conn = new NpgsqlConnection(_connectionString);
+                await conn.OpenAsync();
 
-            foreach (var msg in messages)
-            {
-                if (await _client.GetChannelAsync(msg.ChannelId) is IMessageChannel channel)
+                var messagesToDelete = new List<(ulong ChannelId, ulong MessageId)>();
+
+                using (var cmd = new NpgsqlCommand("SELECT ChannelId, MessageId FROM ScheduledDeletions WHERE DeleteAt = @time", conn))
                 {
-                    if (msg.IsEmbed)
+                    cmd.Parameters.AddWithValue("time", time);
+                    using (var reader = await cmd.ExecuteReaderAsync())
                     {
-                        var eb = new EmbedBuilder().WithTitle(msg.Title).WithDescription(msg.Content).WithColor(Color.Blue).Build();
-                        await channel.SendMessageAsync(embed: eb);
-                    }
-                    else await channel.SendMessageAsync(msg.Content);
-
-                    using var del = new NpgsqlCommand("DELETE FROM scheduled_messages WHERE id = @id", conn);
-                    del.Parameters.AddWithValue("id", msg.Id);
-                    await del.ExecuteNonQueryAsync();
-                }
-            }
-        }
-
-        // --- 自動削除ロジック (deleteago) ---
-        private async Task ProcessAutoPurge()
-        {
-            using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync();
-            
-            using var cmd = new NpgsqlCommand("SELECT channel_id, days_ago, protection_type FROM auto_purge_settings", conn);
-            using var reader = await cmd.ExecuteReaderAsync();
-            
-            while (await reader.ReadAsync())
-            {
-                var channelId = ulong.Parse(reader.GetString(0));
-                var days = reader.GetInt32(1);
-                var protection = reader.GetString(2); 
-
-                if (await _client.GetChannelAsync(channelId) is ITextChannel channel)
-                {
-                    var cutoffDate = DateTimeOffset.UtcNow.AddDays(-days);
-                    var messages = channel.GetMessagesAsync(100).Flatten();
-
-                    await foreach (var message in messages)
-                    {
-                        if (message.CreatedAt < cutoffDate)
+                        while (await reader.ReadAsync())
                         {
-                            bool hasImage = message.Attachments.Count > 0;
-                            bool hasReaction = message.Reactions.Count > 0;
-
-                            bool shouldProtect = protection switch {
-                                "Image" => hasImage,
-                                "Reaction" => hasReaction,
-                                "Both" => hasImage || hasReaction,
-                                _ => false
-                            };
-
-                            if (!shouldProtect) await message.DeleteAsync();
+                            messagesToDelete.Add(((ulong)reader.GetInt64(0), (ulong)reader.GetInt64(1)));
                         }
                     }
                 }
+
+                foreach (var (channelId, messageId) in messagesToDelete)
+                {
+                    try
+                    {
+                        var channel = _client.GetChannel(channelId) as IMessageChannel;
+                        if (channel != null)
+                        {
+                            await channel.DeleteMessageAsync(messageId);
+                        }
+
+                        using (var delCmd = new NpgsqlCommand("DELETE FROM ScheduledDeletions WHERE MessageId = @mid", conn))
+                        {
+                            delCmd.Parameters.AddWithValue("mid", (long)messageId);
+                            await delCmd.ExecuteNonQueryAsync();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Worker] Failed to delete message {messageId}: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // DBエラーが起きても、ログを出力するだけで上位には例外を投げない
+                Console.WriteLine($"[Worker DB Connection Error]: {ex.Message}");
+                // 認証失敗(28P01)などの場合は、ここで処理を中断して次のループへ回す
             }
         }
-
-        private class ScheduledInfo { public int Id; public ulong ChannelId; public string Content; public bool IsEmbed; public string? Title; }
     }
 }
