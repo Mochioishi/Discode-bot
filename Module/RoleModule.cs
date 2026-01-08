@@ -8,8 +8,7 @@ namespace DiscordBot.Modules
 {
     public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     {
-        // 「どのユーザー(ulong)」が「どのロール(IRole)」を設定しようとしているかを一時保持
-        // 他のクラスからも参照できるように static で宣言します
+        // ユーザーIDと設定したいロールの紐付けを一時保持
         public static readonly ConcurrentDictionary<ulong, IRole> PendingSettings = new();
 
         [SlashCommand("rolegive", "ロールを選択後、対象のメッセージにリアクションして設定を完了させます")]
@@ -25,7 +24,11 @@ namespace DiscordBot.Modules
                 ephemeral: true);
 
             // 1分後に自動的に辞書から削除（タイムアウト処理）
-            _ = Task.Delay(60000).ContinueWith(_ => PendingSettings.TryRemove(Context.User.Id, out _));
+            // エラー箇所: TryRemove の引数を修正しました
+            _ = Task.Delay(60000).ContinueWith(_ => 
+            {
+                PendingSettings.TryRemove(Context.User.Id, out _);
+            });
         }
     }
 }
