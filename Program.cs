@@ -1,8 +1,7 @@
 using Discord;
-using Discord.Commands;
 using Discord.Interactions;
 using Discord.WebSocket;
-using DiscordBot.Services; // WorkerやHandlerの場所
+using DiscordBot.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System;
@@ -14,7 +13,7 @@ namespace DiscordBot
     {
         public static async Task Main(string[] args)
         {
-            // 1. DB初期化（テーブル作成など）
+            // 1. DB初期化
             try
             {
                 DbInitializer.Initialize();
@@ -25,29 +24,44 @@ namespace DiscordBot
                 Console.WriteLine($"DB Initialization Error: {ex.Message}");
             }
 
-            // 2. ホストの構築と実行
-            var host = Host.CreateDefaultBuilder(args)
+            // 2. ホストの構築
+            using IHost host = Host.CreateDefaultBuilder(args)
                 .ConfigureServices((hostContext, services) =>
                 {
-                    // Discordクライアントの設定
                     var config = new DiscordSocketConfig
                     {
-                        GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent | GatewayIntents.GuildMembers,
+                        // メッセージ内容の読み取り、サーバーメンバー、リアクションに必要なインテント
+                        GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent | GatewayIntents.GuildMembers | GatewayIntents.GuildMessageReactions,
                         AlwaysDownloadUsers = true
                     };
+
                     services.AddSingleton(new DiscordSocketClient(config));
-
-                    // スラッシュコマンド用のサービス
                     services.AddSingleton(x => new InteractionService(x.GetRequiredService<DiscordSocketClient>()));
-
-                    // イベントハンドラー (メッセージ監視など)
+                    
+                    // InteractionHandlerをSingletonで登録
                     services.AddSingleton<InteractionHandler>();
-
-                    // バックグラウンドWorker (予約投稿・自動削除)
+                    
+                    // TimeSignalWorkerをバックグラウンドサービスとして登録
                     services.AddHostedService<TimeSignalWorker>();
                 })
                 .Build();
 
+            // 3. 実行前のログイン処理 (ここが重要です)
+            var client = host.Services.GetRequiredService<DiscordSocketClient>();
+            var handler = host.Services.GetRequiredService<InteractionHandler>(); // ハンドラーをインスタンス化してイベント登録を有効化
+
+            string token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                Console.WriteLine("Error: DISCORD_TOKEN is not set in environment variables.");
+                return;
+            }
+
+            await client.LoginAsync(TokenType.Bot, token);
+            await client.StartAsync();
+
+            // 4. ホストの開始
             await host.RunAsync();
         }
     }
