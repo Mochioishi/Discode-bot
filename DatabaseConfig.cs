@@ -16,7 +16,8 @@ public class DatabaseInitializer
         using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        // 強制リセット命令：古い小文字のテーブルを消し、大文字混じりの正しい名前で作る
+        // 【ここが重要】IF NOT EXISTS を外し、DROP を追加しました。
+        // これにより、今邪魔をしている古いテーブルを消し去ります。
         var sql = @"
             DROP TABLE IF EXISTS scheduleddeletions;
             DROP TABLE IF EXISTS ""ScheduledDeletions"";
@@ -36,6 +37,8 @@ public class DatabaseInitializer
 
         using var command = new NpgsqlCommand(sql, connection);
         await command.ExecuteNonQueryAsync();
-        Console.WriteLine("CRITICAL: Database tables RE-CREATED successfully.");
+        
+        // ログ出力を変えて、新しいコードが動いているか判別できるようにします
+        Console.WriteLine("--- CRITICAL: TABLES RE-CREATED FROM SCRATCH ---");
     }
 }
