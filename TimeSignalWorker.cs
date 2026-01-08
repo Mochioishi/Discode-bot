@@ -12,15 +12,25 @@ namespace DiscordBot.Services
     public class TimeSignalWorker : BackgroundService
     {
         private readonly DiscordSocketClient _client;
-        private readonly string _connectionString;
+        private string _connectionString;
         private readonly string _targetChannelId;
         private readonly TimeZoneInfo _tzi = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
 
         public TimeSignalWorker(DiscordSocketClient client)
         {
             _client = client;
-            _connectionString = DbConfig.GetConnectionString();
             _targetChannelId = Environment.GetEnvironmentVariable("TARGET_CHANNEL_ID") ?? "";
+            
+            // 起動時にDB接続文字列の読み込みに失敗しても、プログラムを落とさない
+            try
+            {
+                _connectionString = DbConfig.GetConnectionString();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Critical] Failed to load ConnectionString in Worker: {ex.Message}");
+                _connectionString = ""; // 空文字で初期化してクラッシュを防ぐ
+            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -42,7 +52,7 @@ namespace DiscordBot.Services
                     }
                 }
 
-                // 毎分、期限切れメッセージをDBから確認して削除
+                // 定期的なDB処理もエラーで止まらないように実行
                 await ProcessScheduledMessages(timeStr);
 
                 // 1分待機
@@ -54,7 +64,7 @@ namespace DiscordBot.Services
         {
             if (ulong.TryParse(_targetChannelId, out var channelId))
             {
-                var channel = _client.GetChannel(channelId) as IMessageChannel;
+                var channel = await _client.GetChannelAsync(channelId) as IMessageChannel;
                 if (channel != null)
                 {
                     await channel.SendMessageAsync("🔆アラーム！");
@@ -64,8 +74,9 @@ namespace DiscordBot.Services
 
         private async Task ProcessScheduledMessages(string time)
         {
-            // ここがログの92行目付近です。
-            // try-catchで囲むことで、パスワードエラーが起きてもBotが終了するのを防ぎます。
+            // 接続文字列が空、または形式が不正な場合は処理をスキップ
+            if (string.IsNullOrEmpty(_connectionString)) return;
+
             try
             {
                 using var conn = new NpgsqlConnection(_connectionString);
@@ -89,7 +100,7 @@ namespace DiscordBot.Services
                 {
                     try
                     {
-                        var channel = _client.GetChannel(channelId) as IMessageChannel;
+                        var channel = await _client.GetChannelAsync(channelId) as IMessageChannel;
                         if (channel != null)
                         {
                             await channel.DeleteMessageAsync(messageId);
@@ -109,9 +120,14 @@ namespace DiscordBot.Services
             }
             catch (Exception ex)
             {
-                // DBエラーが起きても、ログを出力するだけで上位には例外を投げない
-                Console.WriteLine($"[Worker DB Connection Error]: {ex.Message}");
-                // 認証失敗(28P01)などの場合は、ここで処理を中断して次のループへ回す
+                // DBエラーが起きてもログを出して続行
+                Console.WriteLine($"[Worker DB Error]: {ex.Message}");
+                
+                // もし接続文字列自体のエラー(ArgumentException)が起きていた場合、
+                // 再読み込みを試みることで、Railway側で変数を直した際に反映される可能性があります
+                if (ex is ArgumentException) {
+                     try { _connectionString = DbConfig.GetConnectionString(); } catch { }
+                }
             }
         }
     }
