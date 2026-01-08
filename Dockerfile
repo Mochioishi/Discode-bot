@@ -1,18 +1,17 @@
+# ビルド環境
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-env
-WORKDIR /src
-
-# リポジトリ全体をコピー
-COPY . .
-
-# ★ ルート直下に csproj があるので移動しない
-RUN dotnet restore "Discord-bot.csproj"
-
-# ビルド＆発行
-RUN dotnet publish "Discord-bot.csproj" -c Release -o /app
-
-# 実行用イメージ
-FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
-COPY --from=build-env /app .
+
+# すべてのファイルをコピー
+COPY . ./
+
+# プロジェクトファイルを自動検索してビルド
+RUN dotnet restore
+RUN dotnet publish -c Release -o out
+
+# 実行環境
+FROM mcr.microsoft.com/dotnet/runtime:8.0
+WORKDIR /app
+COPY --from=build-env /app/out .
 
 ENTRYPOINT ["dotnet", "Discord-bot.dll"]
