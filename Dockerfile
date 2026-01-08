@@ -4,10 +4,7 @@ WORKDIR /src
 # リポジトリ全体をコピー
 COPY . .
 
-# csproj があるフォルダへ移動
-WORKDIR /src/Discord-bot
-
-# 依存関係を復元
+# ★ ルート直下に csproj があるので移動しない
 RUN dotnet restore "Discord-bot.csproj"
 
 # ビルド＆発行
