@@ -5,14 +5,16 @@ public static class DbConfig
 {
     public static string GetConnectionString()
     {
+        // 1. 環境変数からURLを取得
         var url = Environment.GetEnvironmentVariable("DATABASE_URL");
         if (string.IsNullOrEmpty(url)) throw new Exception("DATABASE_URL is not set.");
 
-        // 手動パース（Uri userInfoなど）をせず、コンストラクタに直接URLを入れる
-        // これにより、特殊文字が含まれていてもNpgsqlが正しく処理します
+        // 2. 【重要】手動でUriクラスを使って分割せず、そのままBuilderに渡す
+        // 手動パースは特殊文字やエンコードで認証失敗(28P01)の原因になります
         var builder = new NpgsqlConnectionStringBuilder(url);
 
-        // Railway内部接続で最も安定する設定
+        // 3. Railway内部接続用の微調整
+        // 内部ネットワーク(internal)ではSSLをDisableにしないと認証エラーになる場合があります
         builder.SslMode = SslMode.Disable; 
         builder.TrustServerCertificate = true;
         builder.Pooling = true;
