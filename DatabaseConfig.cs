@@ -16,20 +16,26 @@ public class DatabaseInitializer
         using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        // 1. 古いテーブル（小文字や中途半端なもの）を一度完全に消去します
-        // 2. その後、Worker が探している正確な名前で作り直します
+        // 強制リセット命令：古い小文字のテーブルを消し、大文字混じりの正しい名前で作る
         var sql = @"
-            DROP TABLE IF EXISTS ""ScheduledDeletions"";
             DROP TABLE IF EXISTS scheduleddeletions;
+            DROP TABLE IF EXISTS ""ScheduledDeletions"";
 
             CREATE TABLE ""ScheduledDeletions"" (
                 ""MessageId"" BIGINT PRIMARY KEY,
                 ""ChannelId"" BIGINT NOT NULL,
                 ""DeleteAt"" TIMESTAMP WITH TIME ZONE NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ""ReactionRoles"" (
+                ""MessageId"" BIGINT,
+                ""Emoji"" TEXT,
+                ""RoleId"" BIGINT,
+                PRIMARY KEY (""MessageId"", ""Emoji"")
             );";
 
         using var command = new NpgsqlCommand(sql, connection);
         await command.ExecuteNonQueryAsync();
-        Console.WriteLine("Database tables RE-CREATED successfully.");
+        Console.WriteLine("CRITICAL: Database tables RE-CREATED successfully.");
     }
 }
