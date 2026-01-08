@@ -1,5 +1,6 @@
 using Discord;
 using Discord.WebSocket;
+using DiscordBot.Infrastructure;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
 using System;
