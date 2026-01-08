@@ -5,21 +5,17 @@ public static class DbConfig
 {
     public static string GetConnectionString()
     {
-        // Railwayから渡される postgresql://... の形式を直接取得
         var url = Environment.GetEnvironmentVariable("DATABASE_URL");
-        
-        if (string.IsNullOrEmpty(url)) 
-            throw new Exception("DATABASE_URL is not set.");
+        if (string.IsNullOrEmpty(url)) throw new Exception("DATABASE_URL is not set.");
 
-        // 手動でパースせず、NpgsqlConnectionStringBuilder に直接流し込むのが最も安全
-        var builder = new NpgsqlConnectionStringBuilder(url)
-        {
-            // Railway内部接続（postgres.railway.internal）の場合、SSLが原因で認証エラーになることがある
-            // そのため、SSLを無効化しつつ証明書を信頼する設定を上書きする
-            SslMode = SslMode.Disable, 
-            TrustServerCertificate = true,
-            Pooling = true
-        };
+        // 手動パース（Uri userInfoなど）をせず、コンストラクタに直接URLを入れる
+        // これにより、特殊文字が含まれていてもNpgsqlが正しく処理します
+        var builder = new NpgsqlConnectionStringBuilder(url);
+
+        // Railway内部接続で最も安定する設定
+        builder.SslMode = SslMode.Disable; 
+        builder.TrustServerCertificate = true;
+        builder.Pooling = true;
 
         return builder.ToString();
     }
