@@ -6,6 +6,7 @@ using Npgsql;
 using System;
 using System.Reflection;
 using System.Threading.Tasks;
+using Discord_bot.Module;
 
 namespace DiscordBot.Services
 {
