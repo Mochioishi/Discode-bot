@@ -52,19 +52,25 @@ namespace DiscordBot.Services
             if (reaction.User.Value.IsBot) return;
 
             // --- 1. リアクションロールの設定モード中かチェック ---
+            // role 変数の中身は (string Text, IRole Role, int Minutes) というタプルです
             if (RoleModule.PendingSettings.TryRemove(reaction.UserId, out var role))
             {
                 try
                 {
                     using var conn = new NpgsqlConnection(_connectionString);
                     await conn.OpenAsync();
+                    
+                    // テーブル名とカラム名は PostgreSQL の仕様に合わせてダブルクォーテーションで囲むのが安全です
                     using var cmd = new NpgsqlCommand(
-                        "INSERT INTO ReactionRoles (MessageId, Emoji, RoleId) VALUES (@mid, @emoji, @rid) " +
-                        "ON CONFLICT (MessageId, Emoji) DO UPDATE SET RoleId = @rid", conn);
+                        "INSERT INTO \"ReactionRoles\" (\"MessageId\", \"Emoji\", \"RoleId\") VALUES (@mid, @emoji, @rid) " +
+                        "ON CONFLICT (\"MessageId\", \"Emoji\") DO UPDATE SET \"RoleId\" = @rid", conn);
 
                     cmd.Parameters.AddWithValue("mid", (long)reaction.MessageId);
                     cmd.Parameters.AddWithValue("emoji", reaction.Emote.ToString() ?? "");
-                    cmd.Parameters.AddWithValue("rid", (long)role.Id);
+                    
+                    // 【修正箇所】role.Id ではなく role.Role.Id と指定します
+                    cmd.Parameters.AddWithValue("rid", (long)role.Role.Id); 
+                    
                     await cmd.ExecuteNonQueryAsync();
 
                     // ボットもリアクションして設定完了を通知
@@ -73,7 +79,7 @@ namespace DiscordBot.Services
                     {
                         await userMsg.AddReactionAsync(reaction.Emote);
                     }
-                    return; // 設定処理が終わったのでここで終了
+                    return; 
                 }
                 catch (Exception ex)
                 {
@@ -86,7 +92,7 @@ namespace DiscordBot.Services
             {
                 using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
-                using var cmd = new NpgsqlCommand("SELECT RoleId FROM ReactionRoles WHERE MessageId = @mid AND Emoji = @emoji", conn);
+                using var cmd = new NpgsqlCommand("SELECT \"RoleId\" FROM \"ReactionRoles\" WHERE \"MessageId\" = @mid AND \"Emoji\" = @emoji", conn);
                 cmd.Parameters.AddWithValue("mid", (long)reaction.MessageId);
                 cmd.Parameters.AddWithValue("emoji", reaction.Emote.ToString() ?? "");
 
@@ -118,7 +124,7 @@ namespace DiscordBot.Services
             {
                 using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
-                using var cmd = new NpgsqlCommand("SELECT RoleId FROM ReactionRoles WHERE MessageId = @mid AND Emoji = @emoji", conn);
+                using var cmd = new NpgsqlCommand("SELECT \"RoleId\" FROM \"ReactionRoles\" WHERE \"MessageId\" = @mid AND \"Emoji\" = @emoji", conn);
                 cmd.Parameters.AddWithValue("mid", (long)reaction.MessageId);
                 cmd.Parameters.AddWithValue("emoji", reaction.Emote.ToString() ?? "");
 
