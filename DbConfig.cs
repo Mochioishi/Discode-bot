@@ -1,32 +1,38 @@
 using Npgsql;
 using System;
 
-public static class DbConfig
+public static class DbInitializer
 {
-    public static string GetConnectionString()
+    public static void Initialize()
     {
-        var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+        // DbConfigから接続文字列を取得
+        using var conn = new NpgsqlConnection(DbConfig.GetConnectionString());
+        conn.Open();
 
-        if (string.IsNullOrEmpty(databaseUrl))
-        {
-            // ローカル開発用（必要に応じて書き換えてください）
-            return "Host=localhost;Username=postgres;Password=password;Database=discord_bot";
-        }
+        using var cmd = new NpgsqlCommand();
+        cmd.Connection = conn;
 
-        try
-        {
-            // Railwayの環境変数（Host=...形式）をそのまま読み込む
-            var builder = new NpgsqlConnectionStringBuilder(databaseUrl);
-            
-            // 内部接続用にSSLを無効化し、安定性を高める
-            builder.SslMode = SslMode.Disable;
-            builder.TrustServerCertificate = true;
+        // 強制リセット命令
+        cmd.CommandText = @"
+            DROP TABLE IF EXISTS scheduleddeletions;
+            DROP TABLE IF EXISTS ""ScheduledDeletions"";
 
-            return builder.ToString();
-        }
-        catch
-        {
-            return databaseUrl;
-        }
+            CREATE TABLE ""ScheduledDeletions"" (
+                ""MessageId"" BIGINT PRIMARY KEY,
+                ""ChannelId"" BIGINT NOT NULL,
+                ""DeleteAt"" TIMESTAMP WITH TIME ZONE NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ""ReactionRoles"" (
+                ""MessageId"" BIGINT,
+                ""Emoji"" TEXT,
+                ""RoleId"" BIGINT,
+                PRIMARY KEY (""MessageId"", ""Emoji"")
+            );";
+
+        cmd.ExecuteNonQuery();
+        
+        // このログが出ることを確認してください
+        Console.WriteLine("--- CRITICAL: TABLES RE-CREATED FROM SCRATCH ---");
     }
 }
