@@ -14,7 +14,7 @@ namespace DiscordBot.Infrastructure
             cmd.Connection = conn;
 
             cmd.CommandText = @"
-                -- 1. 自動削除テーブルのリセット
+                -- 1. 自動削除テーブル
                 DROP TABLE IF EXISTS scheduleddeletions CASCADE;
                 DROP TABLE IF EXISTS ""ScheduledDeletions"" CASCADE;
 
@@ -33,10 +33,14 @@ namespace DiscordBot.Infrastructure
                 );
 
                 -- 3. Botテキスト保存用テーブル
-                -- もし古い小文字名があれば削除して新しく作成
+                -- カラム名を設計（Text, Title, ShowTime）に合わせて一新します
                 DROP TABLE IF EXISTS bottexts CASCADE;
-                CREATE TABLE IF NOT EXISTS ""BotTexts"" (
-                    ""Content"" TEXT
+                DROP TABLE IF EXISTS ""BotTexts"" CASCADE;
+
+                CREATE TABLE ""BotTexts"" (
+                    ""Text"" TEXT,            -- 本文
+                    ""Title"" TEXT,           -- タイトル
+                    ""ShowTime"" BOOLEAN DEFAULT FALSE -- 時刻表示フラグ
                 );";
 
             cmd.ExecuteNonQuery();
