@@ -1,13 +1,11 @@
 using Discord;
 using Discord.Interactions;
-using Discord.WebSocket;
-using DiscordBot.Modules;
 using DiscordBot.Infrastructure;
+using DiscordBot.Modules; // PendingSettings 参照用
 using Npgsql;
 using System;
 using System.Reflection;
 using System.Threading.Tasks;
-using Discord_bot.Module;
 
 namespace DiscordBot.Services
 {
@@ -26,8 +24,6 @@ namespace DiscordBot.Services
             _connectionString = DbConfig.GetConnectionString();
 
             _client.InteractionCreated += HandleInteraction;
-            _client.ReactionAdded += HandleReactionAdded;
-            _client.ReactionRemoved += HandleReactionRemoved;
         }
 
         public async Task InitializeAsync()
@@ -39,113 +35,53 @@ namespace DiscordBot.Services
         {
             try
             {
+                // 1. ボタン操作 (MessageComponent) の判定
+                if (interaction is SocketMessageComponent component)
+                {
+                    if (component.Data.CustomId.StartsWith("bt_del_"))
+                    {
+                        var idStr = component.Data.CustomId.Replace("bt_del_", "");
+                        if (int.TryParse(idStr, out int id))
+                        {
+                            await HandleDeleteAsync(id, component);
+                        }
+                        return;
+                    }
+                }
+
+                // 2. 通常のスラッシュコマンドの実行
                 var context = new SocketInteractionContext(_client, interaction);
                 await _handler.ExecuteCommandAsync(context, _services);
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex);
+                Console.WriteLine($"[Interaction Error]: {ex}");
             }
         }
 
-        private async Task HandleReactionAdded(Cacheable<IUserMessage, ulong> cachedMessage, Cacheable<IMessageChannel, ulong> channel, SocketReaction reaction)
+        private async Task HandleDeleteAsync(int id, SocketMessageComponent component)
         {
-            if (reaction.User.Value.IsBot) return;
-
-            // --- 1. リアクションロールの設定モード中かチェック ---
-            // role 変数の中身は (string Text, IRole Role, int Minutes) というタプルです
-            if (RoleModule.PendingSettings.TryRemove(reaction.UserId, out var role))
-            {
-                try
-                {
-                    using var conn = new NpgsqlConnection(_connectionString);
-                    await conn.OpenAsync();
-                    
-                    // テーブル名とカラム名は PostgreSQL の仕様に合わせてダブルクォーテーションで囲むのが安全です
-                    using var cmd = new NpgsqlCommand(
-                        "INSERT INTO \"ReactionRoles\" (\"MessageId\", \"Emoji\", \"RoleId\") VALUES (@mid, @emoji, @rid) " +
-                        "ON CONFLICT (\"MessageId\", \"Emoji\") DO UPDATE SET \"RoleId\" = @rid", conn);
-
-                    cmd.Parameters.AddWithValue("mid", (long)reaction.MessageId);
-                    cmd.Parameters.AddWithValue("emoji", reaction.Emote.ToString() ?? "");
-                    
-                    // 【修正箇所】role.Id ではなく role.Role.Id と指定します
-                    cmd.Parameters.AddWithValue("rid", (long)role.Role.Id); 
-                    
-                    await cmd.ExecuteNonQueryAsync();
-
-                    // ボットもリアクションして設定完了を通知
-                    var msg = await reaction.Channel.GetMessageAsync(reaction.MessageId);
-                    if (msg is IUserMessage userMsg)
-                    {
-                        await userMsg.AddReactionAsync(reaction.Emote);
-                    }
-                    return; 
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[DB Error] {ex.Message}");
-                }
-            }
-
-            // --- 2. 通常のロール付与ロジック ---
             try
             {
                 using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
-                using var cmd = new NpgsqlCommand("SELECT \"RoleId\" FROM \"ReactionRoles\" WHERE \"MessageId\" = @mid AND \"Emoji\" = @emoji", conn);
-                cmd.Parameters.AddWithValue("mid", (long)reaction.MessageId);
-                cmd.Parameters.AddWithValue("emoji", reaction.Emote.ToString() ?? "");
+                var sql = "DELETE FROM \"BotTextSchedules\" WHERE \"Id\" = @id";
+                using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("id", id);
+                int rows = await cmd.ExecuteNonQueryAsync();
 
-                var result = await cmd.ExecuteScalarAsync();
-                if (result != null)
+                if (rows > 0)
                 {
-                    var roleId = (ulong)(long)result;
-                    var guild = (reaction.Channel as SocketGuildChannel)?.Guild;
-                    var user = guild?.GetUser(reaction.UserId);
-                    var targetRole = guild?.GetRole(roleId);
-
-                    if (user != null && targetRole != null)
-                    {
-                        await user.AddRoleAsync(targetRole);
-                    }
+                    await component.UpdateAsync(msg => {
+                        msg.Content = $"✅ 予約 (ID: {id}) を削除しました。";
+                        msg.Components = new ComponentBuilder().Build(); // ボタンを消去
+                    });
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex);
-            }
-        }
-
-        private async Task HandleReactionRemoved(Cacheable<IUserMessage, ulong> cachedMessage, Cacheable<IMessageChannel, ulong> channel, SocketReaction reaction)
-        {
-            if (reaction.User.Value.IsBot) return;
-
-            try
-            {
-                using var conn = new NpgsqlConnection(_connectionString);
-                await conn.OpenAsync();
-                using var cmd = new NpgsqlCommand("SELECT \"RoleId\" FROM \"ReactionRoles\" WHERE \"MessageId\" = @mid AND \"Emoji\" = @emoji", conn);
-                cmd.Parameters.AddWithValue("mid", (long)reaction.MessageId);
-                cmd.Parameters.AddWithValue("emoji", reaction.Emote.ToString() ?? "");
-
-                var result = await cmd.ExecuteScalarAsync();
-                if (result != null)
-                {
-                    var roleId = (ulong)(long)result;
-                    var guild = (reaction.Channel as SocketGuildChannel)?.Guild;
-                    var user = guild?.GetUser(reaction.UserId);
-                    var targetRole = guild?.GetRole(roleId);
-
-                    if (user != null && targetRole != null)
-                    {
-                        await user.RemoveRoleAsync(targetRole);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex);
+                Console.WriteLine($"[Delete Action Error]: {ex.Message}");
+                await component.RespondAsync("⚠️ 削除に失敗しました。", ephemeral: true);
             }
         }
     }
