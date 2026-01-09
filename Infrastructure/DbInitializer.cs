@@ -13,12 +13,10 @@ namespace DiscordBot.Infrastructure
             using var cmd = new NpgsqlCommand();
             cmd.Connection = conn;
 
+            // すべてのテーブルを「存在しない時だけ作る」設定に変更しました
             cmd.CommandText = @"
                 -- 1. 自動削除テーブル
-                DROP TABLE IF EXISTS scheduleddeletions CASCADE;
-                DROP TABLE IF EXISTS ""ScheduledDeletions"" CASCADE;
-
-                CREATE TABLE ""ScheduledDeletions"" (
+                CREATE TABLE IF NOT EXISTS ""ScheduledDeletions"" (
                     ""MessageId"" BIGINT PRIMARY KEY,
                     ""ChannelId"" BIGINT NOT NULL,
                     ""DeleteAt"" TIMESTAMP WITH TIME ZONE NOT NULL
@@ -32,19 +30,33 @@ namespace DiscordBot.Infrastructure
                     PRIMARY KEY (""MessageId"", ""Emoji"")
                 );
 
-                -- 3. Botテキスト保存用テーブル
-                -- カラム名を設計（Text, Title, ShowTime）に合わせて一新します
-                DROP TABLE IF EXISTS bottexts CASCADE;
-                DROP TABLE IF EXISTS ""BotTexts"" CASCADE;
+                -- 3. Botテキスト予約投稿用テーブル (BotTextSchedules)
+                -- 前回の統合版に合わせ、ChannelId カラムを含む最新構成で作成します
+                CREATE TABLE IF NOT EXISTS ""BotTextSchedules"" (
+                    ""Id"" SERIAL PRIMARY KEY,
+                    ""Text"" TEXT NOT NULL,
+                    ""Title"" TEXT,
+                    ""ScheduledTime"" TEXT NOT NULL,
+                    ""ShowTime"" BOOLEAN DEFAULT TRUE,
+                    ""ChannelId"" TEXT NOT NULL
+                );
 
-                CREATE TABLE ""BotTexts"" (
-                    ""Text"" TEXT,            -- 本文
-                    ""Title"" TEXT,           -- タイトル
-                    ""ShowTime"" BOOLEAN DEFAULT FALSE -- 時刻表示フラグ
+                -- 4. プロセカ監視設定用テーブル
+                CREATE TABLE IF NOT EXISTS ""PrskSettings"" (
+                    ""MonitorChannelId"" TEXT PRIMARY KEY,
+                    ""TargetChannelId"" TEXT NOT NULL,
+                    ""Template"" TEXT NOT NULL
+                );
+
+                -- 5. 自動掃除設定用テーブル (deleteago)
+                CREATE TABLE IF NOT EXISTS ""AutoPurgeSettings"" (
+                    ""ChannelId"" TEXT PRIMARY KEY,
+                    ""DaysAgo"" INTEGER NOT NULL,
+                    ""ProtectionType"" TEXT NOT NULL
                 );";
 
             cmd.ExecuteNonQuery();
-            Console.WriteLine("--- CRITICAL: TABLES RE-CREATED FROM SCRATCH ---");
+            Console.WriteLine("--- Database initialized (Existing data preserved) ---");
         }
     }
 }
