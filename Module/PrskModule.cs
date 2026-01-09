@@ -3,7 +3,6 @@ using Discord.Interactions;
 using Discord.WebSocket;
 using DiscordBot.Infrastructure;
 using Npgsql;
-using System;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -30,7 +29,7 @@ namespace DiscordBot.Modules
             cmd.Parameters.AddWithValue("tc", target.Id.ToString());
             cmd.Parameters.AddWithValue("tp", template);
             await cmd.ExecuteNonQueryAsync();
-            await RespondAsync("✅ 監視開始", ephemeral: true);
+            await RespondAsync("✅ 監視を開始しました。数字を打つとリネーム & 🐾 リアクションを行います。", ephemeral: true);
         }
 
         private async Task OnMessageReceived(SocketMessage msg)
