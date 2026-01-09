@@ -17,97 +17,81 @@ namespace DiscordBot.Modules
         {
             _client = client;
             _conn = DbConfig.GetConnectionString();
-
-            // リアクションの監視イベントを登録
+            
+            // 以前のコード同様、追加と削除の両方を監視
             _client.ReactionAdded += OnReactionAdded;
+            _client.ReactionRemoved += OnReactionRemoved;
         }
 
-        [SlashCommand("rolegive", "リアクションでロールを付与するメッセージを作成します")]
-        public async Task RoleGive(
-            [Summary("text", "メッセージ本文")] string text,
-            [Summary("role", "付与するロール")] IRole role,
-            [Summary("emoji", "使用する絵文字")] string emoji,
-            [Summary("minutes", "自動削除までの分計 (0で永続)")] int minutes = 0)
+        [SlashCommand("rolegive", "リアクションでロールを付与")]
+        public async Task RoleGive(string text, IRole role, string emoji, int minutes = 0)
         {
-            // 1. メッセージを送信
             var embed = new EmbedBuilder()
                 .WithDescription(text)
-                .WithFooter(f => f.Text = $"リアクション {emoji} で @{role.Name} を付与します")
-                .WithColor(Color.Green)
-                .Build();
+                .WithFooter(f => f.Text = $"リアクション {emoji} で @{role.Name} を付与")
+                .WithColor(Color.Green).Build();
 
-            // 返信ではなくチャンネルに新規投稿
             await RespondAsync("作成中...", ephemeral: true);
             var msg = await Context.Channel.SendMessageAsync(embed: embed);
 
-            // 2. 絵文字をボットが自動で付ける
-            if (Emoji.TryParse(emoji, out var resultEmoji))
-            {
-                await msg.AddReactionAsync(resultEmoji);
-            }
-            else if (Emote.TryParse(emoji, out var resultEmote))
-            {
-                await msg.AddReactionAsync(resultEmote);
-            }
+            // 絵文字を付ける (以前のロジック)
+            if (Emoji.TryParse(emoji, out var e1)) await msg.AddReactionAsync(e1);
+            else if (Emote.TryParse(emoji, out var e2)) await msg.AddReactionAsync(e2);
 
-            // 3. DBにリアクションロール設定を保存
             using var conn = new NpgsqlConnection(_conn);
             await conn.OpenAsync();
-            using var cmd = new NpgsqlCommand(
-                "INSERT INTO \"ReactionRoles\" (\"MessageId\", \"Emoji\", \"RoleId\") VALUES (@mid, @emo, @rid)", conn);
+            
+            // ReactionRolesへの保存
+            using var cmd = new NpgsqlCommand("INSERT INTO \"ReactionRoles\" (\"MessageId\", \"Emoji\", \"RoleId\") VALUES (@mid, @emo, @rid)", conn);
             cmd.Parameters.AddWithValue("mid", (long)msg.Id);
             cmd.Parameters.AddWithValue("emo", emoji);
             cmd.Parameters.AddWithValue("rid", (long)role.Id);
             await cmd.ExecuteNonQueryAsync();
 
-            // 4. 自動削除の予約 (minutes > 0 の場合)
+            // 予約削除の連携
             if (minutes > 0)
             {
-                var deleteAt = DateTimeOffset.Now.AddMinutes(minutes);
-                using var delCmd = new NpgsqlCommand(
-                    "INSERT INTO \"ScheduledDeletions\" (\"MessageId\", \"ChannelId\", \"DeleteAt\") VALUES (@mid, @cid, @at)", conn);
+                using var delCmd = new NpgsqlCommand("INSERT INTO \"ScheduledDeletions\" (\"MessageId\", \"ChannelId\", \"DeleteAt\") VALUES (@mid, @cid, @at)", conn);
                 delCmd.Parameters.AddWithValue("mid", (long)msg.Id);
                 delCmd.Parameters.AddWithValue("cid", (long)msg.Channel.Id);
-                delCmd.Parameters.AddWithValue("at", deleteAt);
+                delCmd.Parameters.AddWithValue("at", DateTimeOffset.Now.AddMinutes(minutes));
                 await delCmd.ExecuteNonQueryAsync();
             }
-
-            await FollowupAsync("✅ リアクションロールを作成しました。", ephemeral: true);
+            await FollowupAsync("✅ 作成完了", ephemeral: true);
         }
 
-        // --- リアクション検知ロジック ---
         private async Task OnReactionAdded(Cacheable<IUserMessage, ulong> cache, Cacheable<IMessageChannel, ulong> channel, SocketReaction reaction)
+            => await HandleRoleAsync(reaction, true);
+
+        private async Task OnReactionRemoved(Cacheable<IUserMessage, ulong> cache, Cacheable<IMessageChannel, ulong> channel, SocketReaction reaction)
+            => await HandleRoleAsync(reaction, false);
+
+        private async Task HandleRoleAsync(SocketReaction reaction, bool add)
         {
             if (reaction.User.Value.IsBot) return;
-
             try
             {
                 using var conn = new NpgsqlConnection(_conn);
                 await conn.OpenAsync();
-
-                using var cmd = new NpgsqlCommand(
-                    "SELECT \"RoleId\" FROM \"ReactionRoles\" WHERE \"MessageId\" = @mid AND \"Emoji\" = @emo", conn);
+                
+                // 以前のコードに基づき、絵文字名またはフルテキストで照合
+                using var cmd = new NpgsqlCommand("SELECT \"RoleId\" FROM \"ReactionRoles\" WHERE \"MessageId\" = @mid AND (\"Emoji\" = @emo OR \"Emoji\" LIKE '%' || @name || '%')", conn);
                 cmd.Parameters.AddWithValue("mid", (long)reaction.MessageId);
-                cmd.Parameters.AddWithValue("emo", reaction.Emote.Name);
+                cmd.Parameters.AddWithValue("emo", reaction.Emote.ToString());
+                cmd.Parameters.AddWithValue("name", reaction.Emote.Name);
 
                 var result = await cmd.ExecuteScalarAsync();
                 if (result != null)
                 {
-                    var roleId = (ulong)(long)result;
                     var guildUser = reaction.User.Value as IGuildUser;
-                    var role = guildUser?.Guild.GetRole(roleId);
-
+                    var role = guildUser?.Guild.GetRole((ulong)(long)result);
                     if (guildUser != null && role != null)
                     {
-                        await guildUser.AddRoleAsync(role);
-                        // 通知が必要ならここに追記（例：DM送信など）
+                        if (add) await guildUser.AddRoleAsync(role);
+                        else await guildUser.RemoveRoleAsync(role);
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Role Error]: {ex.Message}");
-            }
+            } catch (Exception ex) { Console.WriteLine(ex.Message); }
         }
     }
 }
