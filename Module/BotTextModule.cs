@@ -3,6 +3,7 @@ using Discord.Interactions;
 using DiscordBot.Infrastructure;
 using Npgsql;
 using System;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace DiscordBot.Modules
@@ -16,89 +17,70 @@ namespace DiscordBot.Modules
             _connectionString = DbConfig.GetConnectionString();
         }
 
-        [SlashCommand("bottext", "テキストを表示・保存します")]
-        public async Task BotTextCommand(
-            [Summary("text", "表示・保存したいメッセージ")] string text = "", 
-            [Summary("embed", "カード形式で表示するか")] bool embed = true,
+        [SlashCommand("bottext_add", "予約投稿を追加します")]
+        public async Task AddSchedule(
+            [Summary("text", "表示したいメッセージ")] string text, 
+            [Summary("time", "投稿時刻 (例: 08:30)")] string time,
             [Summary("title", "カードの見出し")] string title = "お知らせ",
-            [Summary("time", "時刻を表示するか")] bool time = true)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                // embed引数を渡して表示処理へ
-                await ShowTextAsync(embed);
-            }
-            else
-            {
-                // 保存処理
-                await SaveTextAsync(text, title, time);
-                await RespondAsync("✅ 保存しました。引数なしで実行すると表示できます。", ephemeral: true);
-            }
-        }
-
-        private async Task ShowTextAsync(bool useEmbed)
+            [Summary("show_time", "時刻を表示するか")] bool showTime = true)
         {
             try
             {
                 using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
+                var sql = "INSERT INTO \"BotTextSchedules\" (\"Text\", \"Title\", \"ScheduledTime\", \"ShowTime\") VALUES (@txt, @ttl, @tm, @st)";
+                using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("txt", text);
+                cmd.Parameters.AddWithValue("ttl", title);
+                cmd.Parameters.AddWithValue("tm", time);
+                cmd.Parameters.AddWithValue("st", showTime);
+                await cmd.ExecuteNonQueryAsync();
 
-                using var cmd = new NpgsqlCommand("SELECT \"Text\", \"Title\", \"ShowTime\" FROM \"BotTexts\" LIMIT 1", conn);
-                using var reader = await cmd.ExecuteReaderAsync();
-                
-                if (await reader.ReadAsync())
-                {
-                    var savedText = reader.GetString(0);
-                    var title = reader.GetString(1);
-                    var showTime = reader.GetBoolean(2);
-
-                    await RespondAsync("表示します...", ephemeral: true);
-
-                    if (useEmbed)
-                    {
-                        // --- カード形式 (Embed) ---
-                        var eb = new EmbedBuilder()
-                            .WithTitle(title)
-                            .WithDescription(savedText)
-                            .WithColor(new Color(0x3498db));
-
-                        if (showTime) eb.WithCurrentTimestamp();
-
-                        await Context.Channel.SendMessageAsync(embed: eb.Build());
-                    }
-                    else
-                    {
-                        // --- 通常テキスト形式 ---
-                        string msg = $"**{title}**\n{savedText}";
-                        if (showTime) msg += $"\n*(送信時刻: {DateTime.Now:HH:mm})*";
-                        
-                        await Context.Channel.SendMessageAsync(msg);
-                    }
-                }
-                else
-                {
-                    await RespondAsync("❌ 保存データがありません。", ephemeral: true);
-                }
+                await RespondAsync($"✅ {time} に 「{title}」 を予約しました。", ephemeral: true);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[BotText Error]: {ex.Message}");
-                await RespondAsync("⚠️ エラーが発生しました。", ephemeral: true);
+                Console.WriteLine($"[Add Error]: {ex.Message}");
+                await RespondAsync("⚠️ 予約の保存に失敗しました。", ephemeral: true);
             }
         }
 
-        private async Task SaveTextAsync(string text, string title, bool showTime)
+        [SlashCommand("bottext_list", "予約一覧を表示し、ボタンで削除できます")]
+        public async Task ListSchedules()
         {
             using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
-            using (var delCmd = new NpgsqlCommand("DELETE FROM \"BotTexts\"", conn)) await delCmd.ExecuteNonQueryAsync();
-            
-            using var cmd = new NpgsqlCommand(
-                "INSERT INTO \"BotTexts\" (\"Text\", \"Title\", \"ShowTime\") VALUES (@txt, @ttl, @st)", conn);
-            cmd.Parameters.AddWithValue("txt", text);
-            cmd.Parameters.AddWithValue("ttl", title);
-            cmd.Parameters.AddWithValue("st", showTime);
-            await cmd.ExecuteNonQueryAsync();
+            var sql = "SELECT \"Id\", \"ScheduledTime\", \"Title\" FROM \"BotTextSchedules\" ORDER BY \"ScheduledTime\"";
+            using var cmd = new NpgsqlCommand(sql, conn);
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            var builder = new ComponentBuilder();
+            var sb = new StringBuilder();
+            sb.AppendLine("【現在の予約投稿一覧】");
+
+            int count = 0;
+            while (await reader.ReadAsync())
+            {
+                int id = reader.GetInt32(0);
+                string time = reader.GetString(1);
+                string title = reader.GetString(2);
+
+                sb.AppendLine($"`{time}` - **{title}**");
+                
+                // ボタンのCustomIdにIDを埋め込む (例: bt_del_5)
+                builder.WithButton($"削除 ({time})", $"bt_del_{id}", ButtonStyle.Danger);
+                count++;
+            }
+
+            if (count == 0)
+            {
+                await RespondAsync("予約はありません。", ephemeral: true);
+            }
+            else
+            {
+                // リストとボタンを一緒に送信
+                await RespondAsync(sb.ToString(), components: builder.Build(), ephemeral: true);
+            }
         }
     }
 }
