@@ -13,79 +13,92 @@ namespace DiscordBot.Modules
 
         public BotTextModule()
         {
-            // インフラ層から接続文字列を取得するように統一
             _connectionString = DbConfig.GetConnectionString();
         }
 
-        [SlashCommand("bottext", "テキストをボットに保存・表示させます")]
-        public async Task BotTextCommand(string text = "")
+        [SlashCommand("bottext", "テキストを表示・保存します")]
+        public async Task BotTextCommand(
+            [Summary("text", "表示・保存したいメッセージ")] string text = "", 
+            [Summary("embed", "カード形式で表示するか")] bool embed = true,
+            [Summary("title", "カードの見出し")] string title = "お知らせ",
+            [Summary("time", "時刻を表示するか")] bool time = true)
         {
-            // 空の場合はDBから取得して表示、文字がある場合は保存
             if (string.IsNullOrWhiteSpace(text))
             {
-                await ShowTextAsync();
+                // embed引数を渡して表示処理へ
+                await ShowTextAsync(embed);
             }
             else
             {
-                await SaveTextAsync(text);
+                // 保存処理
+                await SaveTextAsync(text, title, time);
+                await RespondAsync("✅ 保存しました。引数なしで実行すると表示できます。", ephemeral: true);
             }
         }
 
-        private async Task ShowTextAsync()
+        private async Task ShowTextAsync(bool useEmbed)
         {
-            string savedText = "保存されたテキストはありません。";
-
             try
             {
                 using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
 
-                // テーブル名とカラム名は引用符で囲む設計に統一
-                using var cmd = new NpgsqlCommand("SELECT \"Content\" FROM \"BotTexts\" LIMIT 1", conn);
-                var result = await cmd.ExecuteScalarAsync();
+                using var cmd = new NpgsqlCommand("SELECT \"Text\", \"Title\", \"ShowTime\" FROM \"BotTexts\" LIMIT 1", conn);
+                using var reader = await cmd.ExecuteReaderAsync();
                 
-                if (result != null)
+                if (await reader.ReadAsync())
                 {
-                    savedText = result.ToString() ?? savedText;
+                    var savedText = reader.GetString(0);
+                    var title = reader.GetString(1);
+                    var showTime = reader.GetBoolean(2);
+
+                    await RespondAsync("表示します...", ephemeral: true);
+
+                    if (useEmbed)
+                    {
+                        // --- カード形式 (Embed) ---
+                        var eb = new EmbedBuilder()
+                            .WithTitle(title)
+                            .WithDescription(savedText)
+                            .WithColor(new Color(0x3498db));
+
+                        if (showTime) eb.WithCurrentTimestamp();
+
+                        await Context.Channel.SendMessageAsync(embed: eb.Build());
+                    }
+                    else
+                    {
+                        // --- 通常テキスト形式 ---
+                        string msg = $"**{title}**\n{savedText}";
+                        if (showTime) msg += $"\n*(送信時刻: {DateTime.Now:HH:mm})*";
+                        
+                        await Context.Channel.SendMessageAsync(msg);
+                    }
+                }
+                else
+                {
+                    await RespondAsync("❌ 保存データがありません。", ephemeral: true);
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[BotText Error]: {ex.Message}");
-                savedText = "エラーが発生しました。";
+                await RespondAsync("⚠️ エラーが発生しました。", ephemeral: true);
             }
-
-            // 【訂正箇所】Reply（返信）ではなく、独立したメッセージとして送信
-            // RespondAsyncだと左上にアイコンが出ますが、SendMessageAsyncなら出ません。
-            await RespondAsync("取得しました", ephemeral: true); // 実行者本人にのみ「取得しました」と通知
-            await Context.Channel.SendMessageAsync(savedText); // チャンネルに独立して投稿
         }
 
-        private async Task SaveTextAsync(string text)
+        private async Task SaveTextAsync(string text, string title, bool showTime)
         {
-            try
-            {
-                using var conn = new NpgsqlConnection(_connectionString);
-                await conn.OpenAsync();
-
-                // テーブルがなければ作成（初期化に含めても良いですが、ここでも担保）
-                var createSql = "CREATE TABLE IF NOT EXISTS \"BotTexts\" (\"Content\" TEXT)";
-                using (var createCmd = new NpgsqlCommand(createSql, conn)) await createCmd.ExecuteNonQueryAsync();
-
-                // 既存のデータを消して新しく保存
-                using (var delCmd = new NpgsqlCommand("DELETE FROM \"BotTexts\"", conn)) await delCmd.ExecuteNonQueryAsync();
-                
-                using var cmd = new NpgsqlCommand("INSERT INTO \"BotTexts\" (\"Content\") VALUES (@txt)", conn);
-                cmd.Parameters.AddWithValue("txt", text);
-                await cmd.ExecuteNonQueryAsync();
-
-                await RespondAsync($"テキストを保存しました： {text}", ephemeral: true);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[BotText Save Error]: {ex.Message}");
-                await RespondAsync("保存に失敗しました。", ephemeral: true);
-            }
+            using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync();
+            using (var delCmd = new NpgsqlCommand("DELETE FROM \"BotTexts\"", conn)) await delCmd.ExecuteNonQueryAsync();
+            
+            using var cmd = new NpgsqlCommand(
+                "INSERT INTO \"BotTexts\" (\"Text\", \"Title\", \"ShowTime\") VALUES (@txt, @ttl, @st)", conn);
+            cmd.Parameters.AddWithValue("txt", text);
+            cmd.Parameters.AddWithValue("ttl", title);
+            cmd.Parameters.AddWithValue("st", showTime);
+            await cmd.ExecuteNonQueryAsync();
         }
     }
 }
