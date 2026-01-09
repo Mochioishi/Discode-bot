@@ -1,4 +1,3 @@
-using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
 using DiscordBot.Infrastructure;
@@ -14,15 +13,14 @@ namespace DiscordBot.Services
         private readonly DiscordSocketClient _client;
         private readonly InteractionService _handler;
         private readonly IServiceProvider _services;
-        private readonly string _connectionString;
+        private readonly string _conn;
 
         public InteractionHandler(DiscordSocketClient client, InteractionService handler, IServiceProvider services)
         {
             _client = client;
             _handler = handler;
             _services = services;
-            _connectionString = DbConfig.GetConnectionString();
-
+            _conn = DbConfig.GetConnectionString();
             _client.InteractionCreated += HandleInteraction;
         }
 
@@ -35,53 +33,30 @@ namespace DiscordBot.Services
         {
             try
             {
-                // ボタン操作 (リアクションロール削除や予約削除など) の判定
-                if (interaction is SocketMessageComponent component)
+                if (interaction is SocketMessageComponent component && component.Data.CustomId.StartsWith("bt_del_"))
                 {
-                    if (component.Data.CustomId.StartsWith("bt_del_"))
-                    {
-                        var idStr = component.Data.CustomId.Replace("bt_del_", "");
-                        if (int.TryParse(idStr, out int id))
-                        {
-                            await HandleDeleteAsync(id, component);
-                        }
-                        return;
-                    }
+                    await HandleDeleteBtn(component);
+                    return;
                 }
-
-                // スラッシュコマンドの実行
                 var context = new SocketInteractionContext(_client, interaction);
                 await _handler.ExecuteCommandAsync(context, _services);
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Interaction Error]: {ex}");
-            }
+            catch (Exception ex) { Console.WriteLine(ex); }
         }
 
-        private async Task HandleDeleteAsync(int id, SocketMessageComponent component)
+        private async Task HandleDeleteBtn(SocketMessageComponent component)
         {
-            try
+            var id = component.Data.CustomId.Replace("bt_del_", "");
+            using var conn = new NpgsqlConnection(_conn);
+            await conn.OpenAsync();
+            using var cmd = new NpgsqlCommand("DELETE FROM \"BotTextSchedules\" WHERE \"Id\" = @id", conn);
+            cmd.Parameters.AddWithValue("id", int.Parse(id));
+            if (await cmd.ExecuteNonQueryAsync() > 0)
             {
-                using var conn = new NpgsqlConnection(_connectionString);
-                await conn.OpenAsync();
-                var sql = "DELETE FROM \"BotTextSchedules\" WHERE \"Id\" = @id";
-                using var cmd = new NpgsqlCommand(sql, conn);
-                cmd.Parameters.AddWithValue("id", id);
-                int rows = await cmd.ExecuteNonQueryAsync();
-
-                if (rows > 0)
-                {
-                    await component.UpdateAsync(msg => {
-                        msg.Content = $"✅ 予約 (ID: {id}) を削除しました。";
-                        msg.Components = new ComponentBuilder().Build();
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Delete Action Error]: {ex.Message}");
-                await component.RespondAsync("⚠️ 削除に失敗しました。", ephemeral: true);
+                await component.UpdateAsync(msg => {
+                    msg.Content = "✅ 削除しました。";
+                    msg.Components = null;
+                });
             }
         }
     }
