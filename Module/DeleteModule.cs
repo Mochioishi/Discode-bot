@@ -11,31 +11,12 @@ namespace DiscordBot.Modules
 {
     public class DeleteModule : InteractionModuleBase<SocketInteractionContext>
     {
+        private readonly string _connectionString;
+        
         // 範囲削除用の開始地点を一時保持（ユーザーID, メッセージID）
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, ulong> _startPoints = new();
 
-        // データベース接続文字列の取得
-        private string GetConnectionString()
-        {
-            var url = Environment.GetEnvironmentVariable("DATABASE_URL");
-            if (string.IsNullOrEmpty(url)) return "Host=localhost;Username=postgres;Password=password;Database=discord_bot";
-
-            var uri = new Uri(url);
-            var userInfo = uri.UserInfo.Split(':');
-
-            return new NpgsqlConnectionStringBuilder
-            {
-                Host = uri.Host,
-                Port = uri.Port,
-                Username = userInfo[0],
-                Password = userInfo[1],
-                Database = uri.LocalPath.TrimStart('/'),
-                SslMode = SslMode.Require,
-                TrustServerCertificate = true
-            }.ToString();
-        }
-
-        // --- 1. 自動削除 (deleteago) ---
+        public DeleteModule() => _connectionString = DbConfig.GetConnectionString();
 
         public enum ProtectionType
         {
@@ -45,30 +26,24 @@ namespace DiscordBot.Modules
             [ChoiceDisplay("画像またはリアクション付きを保護")] Both
         }
 
+        // --- 1. 自動削除 (deleteago) ---
+
         [SlashCommand("deleteago", "このチャンネルの自動削除を設定します")]
         public async Task SetAutoPurge(
             [Summary("days", "何日経過したメッセージを削除するか")] int days,
-            [Summary("protection", "保護対象 (指定なしで『なし』)")] ProtectionType protection = ProtectionType.None
+            [Summary("protection", "保護対象")] ProtectionType protection = ProtectionType.None
         )
         {
             try
             {
-                using var conn = new NpgsqlConnection(GetConnectionString());
+                using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
 
-                using var createTableCmd = new NpgsqlCommand(@"
-                    CREATE TABLE IF NOT EXISTS auto_purge_settings (
-                        channel_id TEXT PRIMARY KEY,
-                        days_ago INTEGER NOT NULL,
-                        protection_type TEXT NOT NULL
-                    );", conn);
-                await createTableCmd.ExecuteNonQueryAsync();
-
                 using var cmd = new NpgsqlCommand(@"
-                    INSERT INTO auto_purge_settings (channel_id, days_ago, protection_type)
+                    INSERT INTO ""AutoPurgeSettings"" (""ChannelId"", ""DaysAgo"", ""ProtectionType"")
                     VALUES (@cid, @days, @prot)
-                    ON CONFLICT (channel_id) 
-                    DO UPDATE SET days_ago = EXCLUDED.days_ago, protection_type = EXCLUDED.protection_type;", conn);
+                    ON CONFLICT (""ChannelId"") 
+                    DO UPDATE SET ""DaysAgo"" = EXCLUDED.""DaysAgo"", ""ProtectionType"" = EXCLUDED.""ProtectionType"";", conn);
 
                 cmd.Parameters.AddWithValue("cid", Context.Channel.Id.ToString());
                 cmd.Parameters.AddWithValue("days", days);
@@ -86,10 +61,10 @@ namespace DiscordBot.Modules
         [SlashCommand("deleteago_list", "自動削除の設定一覧を表示します")]
         public async Task ListAutoPurge()
         {
-            using var conn = new NpgsqlConnection(GetConnectionString());
+            using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
 
-            using var cmd = new NpgsqlCommand("SELECT channel_id, days_ago, protection_type FROM auto_purge_settings", conn);
+            using var cmd = new NpgsqlCommand("SELECT \"ChannelId\", \"DaysAgo\", \"ProtectionType\" FROM \"AutoPurgeSettings\"", conn);
             using var reader = await cmd.ExecuteReaderAsync();
 
             var embed = new EmbedBuilder().WithTitle("🧹 自動削除設定一覧").WithColor(Color.Orange);
@@ -111,9 +86,9 @@ namespace DiscordBot.Modules
         [ComponentInteraction("stop_purge:*")]
         public async Task StopPurge(string cid)
         {
-            using var conn = new NpgsqlConnection(GetConnectionString());
+            using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
-            using var cmd = new NpgsqlCommand("DELETE FROM auto_purge_settings WHERE channel_id = @cid", conn);
+            using var cmd = new NpgsqlCommand("DELETE FROM \"AutoPurgeSettings\" WHERE \"ChannelId\" = @cid", conn);
             cmd.Parameters.AddWithValue("cid", cid);
             await cmd.ExecuteNonQueryAsync();
             await RespondAsync("設定を解除しました。", ephemeral: true);
@@ -160,7 +135,6 @@ namespace DiscordBot.Modules
             var first = Math.Min(start, end);
             var last = Math.Max(start, end);
 
-            // メッセージ取得
             var msgs = await Context.Channel.GetMessagesAsync(first, Direction.After, 100).FlattenAsync();
             var startMsg = await Context.Channel.GetMessageAsync(first);
 
@@ -168,7 +142,6 @@ namespace DiscordBot.Modules
             if (startMsg != null) targets.Add(startMsg);
             foreach (var m in msgs) { targets.Add(m); if (m.Id == last) break; }
 
-            // 保護フィルタリング
             var toDelete = targets.Where(m => {
                 bool hasImg = m.Attachments.Any();
                 bool hasReac = m.Reactions.Any();
