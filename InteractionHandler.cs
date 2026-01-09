@@ -1,7 +1,7 @@
 using Discord;
 using Discord.Interactions;
+using Discord.WebSocket; // ← これが抜けていたためエラーが出ていました
 using DiscordBot.Infrastructure;
-using DiscordBot.Modules; // PendingSettings 参照用
 using Npgsql;
 using System;
 using System.Reflection;
@@ -35,7 +35,7 @@ namespace DiscordBot.Services
         {
             try
             {
-                // 1. ボタン操作 (MessageComponent) の判定
+                // ボタン操作の判定
                 if (interaction is SocketMessageComponent component)
                 {
                     if (component.Data.CustomId.StartsWith("bt_del_"))
@@ -49,7 +49,7 @@ namespace DiscordBot.Services
                     }
                 }
 
-                // 2. 通常のスラッシュコマンドの実行
+                // スラッシュコマンドの実行
                 var context = new SocketInteractionContext(_client, interaction);
                 await _handler.ExecuteCommandAsync(context, _services);
             }
@@ -74,7 +74,7 @@ namespace DiscordBot.Services
                 {
                     await component.UpdateAsync(msg => {
                         msg.Content = $"✅ 予約 (ID: {id}) を削除しました。";
-                        msg.Components = new ComponentBuilder().Build(); // ボタンを消去
+                        msg.Components = new ComponentBuilder().Build();
                     });
                 }
             }
