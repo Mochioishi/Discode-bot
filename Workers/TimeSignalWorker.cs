@@ -42,6 +42,7 @@ namespace DiscordBot.Services
                 var now = TimeZoneInfo.ConvertTime(DateTimeOffset.Now, _tzi);
                 var timeStr = now.ToString("HH:mm");
 
+                // 1. 平日アラーム (既存機能)
                 if (now.DayOfWeek != DayOfWeek.Saturday && now.DayOfWeek != DayOfWeek.Sunday)
                 {
                     if (timeStr == "08:25" || timeStr == "12:55" || timeStr == "17:20")
@@ -50,7 +51,12 @@ namespace DiscordBot.Services
                     }
                 }
 
-                await ProcessScheduledMessages(timeStr);
+                // 2. 以前のBotText予約投稿のチェック (追加機能)
+                await ProcessBotTextSchedules(timeStr);
+
+                // 3. 自動削除メッセージのチェック (既存機能)
+                await ProcessScheduledDeletions(timeStr);
+
                 await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
             }
         }
@@ -67,18 +73,55 @@ namespace DiscordBot.Services
             }
         }
 
-        private async Task ProcessScheduledMessages(string time)
+        // --- 以前の BotText 予約送信ロジック ---
+        private async Task ProcessBotTextSchedules(string time)
         {
             if (string.IsNullOrEmpty(_connectionString)) return;
+            try
+            {
+                using var conn = new NpgsqlConnection(_connectionString);
+                await conn.OpenAsync();
 
+                // 修正後のカラム名(Text, Title, ShowTime, ChannelId)に合わせたSQL
+                var sql = "SELECT \"Text\", \"Title\", \"ShowTime\", \"ChannelId\" FROM \"BotTextSchedules\" WHERE \"ScheduledTime\" = @tm";
+                using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("tm", time);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var text = reader.GetString(0);
+                    var title = reader.GetString(1);
+                    var showTime = reader.GetBoolean(2);
+                    if (ulong.TryParse(reader.GetString(3), out var cid))
+                    {
+                        var channel = await _client.GetChannelAsync(cid) as IMessageChannel;
+                        if (channel != null)
+                        {
+                            var eb = new EmbedBuilder()
+                                .WithTitle(title)
+                                .WithDescription(text)
+                                .WithColor(new Color(0x3498db));
+                            if (showTime) eb.WithCurrentTimestamp();
+
+                            await channel.SendMessageAsync(embed: eb.Build());
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { Console.WriteLine($"[Worker BotText Error]: {ex.Message}"); }
+        }
+
+        // --- 自動削除 (ScheduledDeletions) ロジック ---
+        private async Task ProcessScheduledDeletions(string time)
+        {
+            if (string.IsNullOrEmpty(_connectionString)) return;
             try
             {
                 using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
 
                 var messagesToDelete = new List<(ulong ChannelId, ulong MessageId)>();
-
-                // 【修正箇所】テーブル名とカラム名を \" で囲みました
                 var selectSql = "SELECT \"ChannelId\", \"MessageId\" FROM \"ScheduledDeletions\" WHERE \"DeleteAt\"::text LIKE @time || '%'";
 
                 using (var cmd = new NpgsqlCommand(selectSql, conn))
@@ -98,32 +141,16 @@ namespace DiscordBot.Services
                     try
                     {
                         var channel = await _client.GetChannelAsync(channelId) as IMessageChannel;
-                        if (channel != null)
-                        {
-                            await channel.DeleteMessageAsync(messageId);
-                        }
+                        if (channel != null) await channel.DeleteMessageAsync(messageId);
 
-                        // 【修正箇所】ここも \" で囲みました
-                        var deleteSql = "DELETE FROM \"ScheduledDeletions\" WHERE \"MessageId\" = @mid";
-                        using (var delCmd = new NpgsqlCommand(deleteSql, conn))
-                        {
-                            delCmd.Parameters.AddWithValue("mid", (long)messageId);
-                            await delCmd.ExecuteNonQueryAsync();
-                        }
+                        using var delCmd = new NpgsqlCommand("DELETE FROM \"ScheduledDeletions\" WHERE \"MessageId\" = @mid", conn);
+                        delCmd.Parameters.AddWithValue("mid", (long)messageId);
+                        await delCmd.ExecuteNonQueryAsync();
                     }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Worker] Failed to delete message {messageId}: {ex.Message}");
-                    }
+                    catch (Exception ex) { Console.WriteLine($"[Worker Delete Error]: {ex.Message}"); }
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[TimeSignalWorker DB Error]: {ex.Message}");
-                if (ex is ArgumentException) {
-                     try { _connectionString = DbConfig.GetConnectionString(); } catch { }
-                }
-            }
+            catch (Exception ex) { Console.WriteLine($"[Worker DB Error]: {ex.Message}"); }
         }
     }
 }
