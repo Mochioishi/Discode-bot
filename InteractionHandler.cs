@@ -1,58 +1,88 @@
+using Discord;
+using Discord.Interactions;
+using Discord.WebSocket;
+using DiscordBot.Infrastructure;
 using Npgsql;
 using System;
+using System.Reflection;
+using System.Threading.Tasks;
 
-namespace DiscordBot.Infrastructure
+namespace DiscordBot.Services
 {
-    public static class DbInitializer
+    public class InteractionHandler
     {
-        public static void Initialize()
+        private readonly DiscordSocketClient _client;
+        private readonly InteractionService _handler;
+        private readonly IServiceProvider _services;
+        private readonly string _connectionString;
+
+        public InteractionHandler(DiscordSocketClient client, InteractionService handler, IServiceProvider services)
         {
-            using var conn = new NpgsqlConnection(DbConfig.GetConnectionString());
-            conn.Open();
-            using var cmd = new NpgsqlCommand();
-            cmd.Connection = conn;
+            _client = client;
+            _handler = handler;
+            _services = services;
+            _connectionString = DbConfig.GetConnectionString();
 
-            cmd.CommandText = @"
-                -- 1. 自動削除 (Role/Global用)
-                CREATE TABLE IF NOT EXISTS ""ScheduledDeletions"" (
-                    ""MessageId"" BIGINT PRIMARY KEY,
-                    ""ChannelId"" BIGINT NOT NULL,
-                    ""DeleteAt"" TIMESTAMP WITH TIME ZONE NOT NULL
-                );
+            _client.InteractionCreated += HandleInteraction;
+        }
 
-                -- 2. リアクションロール
-                CREATE TABLE IF NOT EXISTS ""ReactionRoles"" (
-                    ""MessageId"" BIGINT,
-                    ""Emoji"" TEXT,
-                    ""RoleId"" BIGINT,
-                    PRIMARY KEY (""MessageId"", ""Emoji"")
-                );
+        public async Task InitializeAsync()
+        {
+            await _handler.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
+        }
 
-                -- 3. 予約投稿
-                CREATE TABLE IF NOT EXISTS ""BotTextSchedules"" (
-                    ""Id"" SERIAL PRIMARY KEY,
-                    ""Text"" TEXT NOT NULL,
-                    ""Title"" TEXT,
-                    ""ScheduledTime"" TEXT NOT NULL,
-                    ""ShowTime"" BOOLEAN DEFAULT TRUE
-                );
+        private async Task HandleInteraction(SocketInteraction interaction)
+        {
+            try
+            {
+                // ボタン操作 (リアクションロール削除や予約削除など) の判定
+                if (interaction is SocketMessageComponent component)
+                {
+                    if (component.Data.CustomId.StartsWith("bt_del_"))
+                    {
+                        var idStr = component.Data.CustomId.Replace("bt_del_", "");
+                        if (int.TryParse(idStr, out int id))
+                        {
+                            await HandleDeleteAsync(id, component);
+                        }
+                        return;
+                    }
+                }
 
-                -- 4. チャンネル自動掃除 (deleteago)
-                CREATE TABLE IF NOT EXISTS ""AutoPurgeSettings"" (
-                    ""ChannelId"" TEXT PRIMARY KEY,
-                    ""DaysAgo"" INTEGER NOT NULL,
-                    ""ProtectionType"" TEXT NOT NULL
-                );
+                // スラッシュコマンドの実行
+                var context = new SocketInteractionContext(_client, interaction);
+                await _handler.ExecuteCommandAsync(context, _services);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Interaction Error]: {ex}");
+            }
+        }
 
-                -- 5. プロセカ部屋番号監視
-                CREATE TABLE IF NOT EXISTS ""PrskSettings"" (
-                    ""MonitorChannelId"" TEXT PRIMARY KEY,
-                    ""TargetChannelId"" TEXT NOT NULL,
-                    ""Template"" TEXT NOT NULL
-                );";
+        private async Task HandleDeleteAsync(int id, SocketMessageComponent component)
+        {
+            try
+            {
+                using var conn = new NpgsqlConnection(_connectionString);
+                await conn.OpenAsync();
+                var sql = "DELETE FROM \"BotTextSchedules\" WHERE \"Id\" = @id";
+                using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("id", id);
+                int rows = await cmd.ExecuteNonQueryAsync();
 
-            cmd.ExecuteNonQuery();
-            Console.WriteLine("--- Database Tables Initialized (Simple & Clean) ---");
+                if (rows > 0)
+                {
+                    await component.UpdateAsync(msg => {
+                        msg.Content = $"✅ 予約 (ID: {id}) を削除しました。";
+                        msg.Components = new ComponentBuilder().Build();
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Delete Action Error]: {ex.Message}");
+                await component.RespondAsync("⚠️ 削除に失敗しました。", ephemeral: true);
+            }
         }
     }
 }
