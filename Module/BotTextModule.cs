@@ -12,19 +12,21 @@ namespace DiscordBot.Modules
         private readonly string _conn;
         public BotTextModule() => _conn = DbConfig.GetConnectionString();
 
-        [SlashCommand("bottext_add", "予約追加")]
+        [SlashCommand("bottext_add", "予約投稿を追加")]
         public async Task Add(string text, string time, ITextChannel channel, string title = "お知らせ", bool show_time = true)
         {
             using var conn = new NpgsqlConnection(_conn); await conn.OpenAsync();
             using var cmd = new NpgsqlCommand(@"INSERT INTO ""BotTextSchedules"" (""Text"", ""Title"", ""ScheduledTime"", ""ShowTime"", ""ChannelId"") VALUES (@txt, @ttl, @tm, @st, @cid)", conn);
-            cmd.Parameters.AddWithValue("txt", text); cmd.Parameters.AddWithValue("ttl", title);
-            cmd.Parameters.AddWithValue("tm", time); cmd.Parameters.AddWithValue("st", show_time);
+            cmd.Parameters.AddWithValue("txt", text);
+            cmd.Parameters.AddWithValue("ttl", title);
+            cmd.Parameters.AddWithValue("tm", time);
+            cmd.Parameters.AddWithValue("st", show_time);
             cmd.Parameters.AddWithValue("cid", channel.Id.ToString());
             await cmd.ExecuteNonQueryAsync();
-            await RespondAsync("✅ 予約しました", ephemeral: true);
+            await RespondAsync($"✅ {time} に予約しました。", ephemeral: true);
         }
 
-        [SlashCommand("bottext_list", "予約一覧")]
+        [SlashCommand("bottext_list", "予約一覧（削除ボタン付き）")]
         public async Task List()
         {
             using var conn = new NpgsqlConnection(_conn); await conn.OpenAsync();
