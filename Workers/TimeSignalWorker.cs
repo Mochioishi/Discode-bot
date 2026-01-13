@@ -30,7 +30,6 @@ namespace Discord_bot.Workers
                     var now = TimeZoneInfo.ConvertTime(DateTimeOffset.Now, _tzi);
                     var timeStr = now.ToString("HH:mm");
 
-                    // 平日アラーム
                     if (now.DayOfWeek != DayOfWeek.Saturday && now.DayOfWeek != DayOfWeek.Sunday)
                     {
                         if (timeStr == "08:25" || timeStr == "12:55" || timeStr == "17:20")
@@ -41,15 +40,9 @@ namespace Discord_bot.Workers
 
                     await ProcessBotTextSchedules(timeStr);
 
-                    if (timeStr == "04:00")
-                    {
-                        await ExecuteAutoDeleteAgo();
-                    }
+                    if (timeStr == "04:00") await ExecuteAutoDeleteAgo();
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[TimeSignalWorker Error] {ex.Message}");
-                }
+                catch (Exception ex) { Console.WriteLine($"[Worker Error] {ex.Message}"); }
 
                 await Task.Delay(TimeSpan.FromSeconds(60 - DateTime.Now.Second), stoppingToken);
             }
@@ -59,8 +52,8 @@ namespace Discord_bot.Workers
         {
             if (ulong.TryParse(_config["TARGET_CHANNEL_ID"], out var channelId))
             {
-                var channel = await _client.GetChannelAsync(channelId) as IMessageChannel;
-                if (channel != null) await channel.SendMessageAsync("🔆アラーム！");
+                var ch = await _client.GetChannelAsync(channelId) as IMessageChannel;
+                if (ch != null) await ch.SendMessageAsync("🔆アラーム！");
             }
         }
 
@@ -70,9 +63,24 @@ namespace Discord_bot.Workers
             var schedules = await conn.QueryAsync("SELECT * FROM BotTextSchedules WHERE ScheduledTime = @tm", new { tm = time });
             foreach (var s in schedules)
             {
-                var ch = await _client.GetChannelAsync((ulong)s.ChannelId) as IMessageChannel;
-                if (ch != null) await ch.SendMessageAsync(s.Text);
-                await conn.ExecuteAsync("DELETE FROM BotTextSchedules WHERE Id = @id", new { id = s.Id });
+                try
+                {
+                    var ch = await _client.GetChannelAsync((ulong)s.ChannelId) as IMessageChannel;
+                    if (ch != null)
+                    {
+                        if (s.IsEmbed == 1 || s.IsEmbed == true) // MySQLのbool値判定
+                        {
+                            var eb = new EmbedBuilder().WithTitle(s.Title).WithDescription(s.Text).WithColor(Color.Blue).Build();
+                            await ch.SendMessageAsync(embed: eb);
+                        }
+                        else
+                        {
+                            await ch.SendMessageAsync(s.Text);
+                        }
+                    }
+                    await conn.ExecuteAsync("DELETE FROM BotTextSchedules WHERE Id = @id", new { id = s.Id });
+                }
+                catch (Exception ex) { Console.WriteLine(ex.Message); }
             }
         }
 
@@ -80,7 +88,19 @@ namespace Discord_bot.Workers
         {
             using var conn = _db.GetConnection();
             var configs = await conn.QueryAsync("SELECT * FROM DeleteConfigs");
-            // ... (削除ロジック)
+            foreach (var config in configs)
+            {
+                try
+                {
+                    var ch = await _client.GetChannelAsync((ulong)config.ChannelId) as ITextChannel;
+                    if (ch == null) continue;
+                    var beforeDate = DateTimeOffset.Now.AddDays(-(int)config.Days);
+                    var msgs = await ch.GetMessagesAsync(100).FlattenAsync();
+                    var toDelete = msgs.Where(m => m.Timestamp < beforeDate).ToList();
+                    if (toDelete.Any()) await ch.DeleteMessagesAsync(toDelete);
+                }
+                catch (Exception ex) { Console.WriteLine(ex.Message); }
+            }
         }
     }
 }
