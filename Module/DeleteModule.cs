@@ -9,7 +9,7 @@ namespace Discord_bot.Module
     public class DeleteModule : InteractionModuleBase<SocketInteractionContext>
     {
         private readonly DbConfig _db;
-        // ユーザーごとの削除開始地点を一時保持（再起動でリセットされますが、DBを汚さないための設計）
+        // ユーザーごとの削除開始地点を一時保持
         private static readonly ConcurrentDictionary<ulong, ulong> _deleteStarts = new();
 
         public DeleteModule(DbConfig db) => _db = db;
@@ -39,7 +39,8 @@ namespace Discord_bot.Module
         public async Task DeleteAgoList()
         {
             using var conn = _db.GetConnection();
-            var configs = await conn.QueryAsync("SELECT * FROM DeleteConfigs WHERE GuildId = @gid", new { gid = Context.Guild.Id });
+            const string sql = "SELECT * FROM DeleteConfigs WHERE GuildId = @gid";
+            var configs = await conn.QueryAsync(sql, new { gid = Context.Guild.Id });
 
             if (!configs.Any())
             {
@@ -52,11 +53,14 @@ namespace Discord_bot.Module
 
             foreach (var c in configs)
             {
+                // 【修正箇所】SocketGuild では GetChannel (同期) を使用します
+                var channel = Context.Guild.GetChannel((ulong)c.ChannelId);
+                string channelName = channel?.Name ?? "不明なチャンネル";
+
                 string pText = (int)c.ProtectType switch { 1 => "画像", 2 => "リアクション", 3 => "画像/リアクション", _ => "なし" };
-                embed.AddField($"#{(await Context.Guild.GetChannelAsync((ulong)c.ChannelId))?.Name ?? "不明"}", 
-                               $"{c.Days}日前を削除 / 保護: {pText}");
+                embed.AddField($"#{channelName}", $"{c.Days}日前を削除 / 保護: {pText}");
                 
-                builder.WithButton($"削除: {(ulong)c.ChannelId}", $"delago_rmv_{c.ChannelId}", ButtonStyle.Danger);
+                builder.WithButton($"設定削除: #{channelName}", $"delago_rmv_{c.ChannelId}", ButtonStyle.Danger);
             }
 
             await RespondAsync(embed: embed.Build(), components: builder.Build(), ephemeral: true);
@@ -80,10 +84,9 @@ namespace Discord_bot.Module
                 return;
             }
 
-            // 保護対象を選択させるメニュー
             var menu = new SelectMenuBuilder()
                 .WithCustomId($"range_exec:{startId}:{msg.Id}")
-                .WithPlaceholder("保護する対象を選択して削除実行")
+                .WithPlaceholder("保護ルールを選択して削除実行")
                 .AddOption("なし（すべて削除）", "0")
                 .AddOption("画像を保護", "1")
                 .AddOption("リアクションを保護", "2")
@@ -93,29 +96,31 @@ namespace Discord_bot.Module
                 components: new ComponentBuilder().WithSelectMenu(menu).Build(), ephemeral: true);
         }
 
-        // 範囲削除の実行処理 (セレクトメニュー選択時)
         [ComponentInteraction("range_exec:*:*")]
-        public async Task ExecuteRangeDelete(string startIdStr, string endIdStr, string[] selectedRoles)
+        public async Task ExecuteRangeDelete(string startIdStr, string endIdStr, string[] selectedValues)
         {
             await DeferAsync(ephemeral: true);
             
             ulong startId = ulong.Parse(startIdStr);
             ulong endId = ulong.Parse(endIdStr);
-            int protect = int.Parse(selectedRoles[0]);
+            int protect = int.Parse(selectedValues[0]);
 
-            // 開始地点と終了地点のIDを比較して順序を整える
+            // IDを比較して範囲を特定
             var minId = Math.Min(startId, endId);
             var maxId = Math.Max(startId, endId);
 
-            // メッセージ取得 (100件制限の簡易実装。100件超える場合はループが必要)
+            // メッセージ取得（指定メッセージの後、maxIdまでを取得）
             var messages = await Context.Channel.GetMessagesAsync(minId, Direction.After, 100).FlattenAsync();
             var targetMsgs = messages.Where(m => m.Id <= maxId).ToList();
             
-            // 開始地点そのものも含める
+            // 開始メッセージ自体も追加
             var startMsg = await Context.Channel.GetMessageAsync(minId);
             if (startMsg != null) targetMsgs.Add(startMsg);
+            
+            // 終了メッセージ自体も追加（既に含まれている場合が多いが念のため）
+            var endMsg = await Context.Channel.GetMessageAsync(maxId);
+            if (endMsg != null && !targetMsgs.Any(m => m.Id == maxId)) targetMsgs.Add(endMsg);
 
-            // フィルタリング
             var toDelete = targetMsgs.Where(m => {
                 bool hasImage = m.Attachments.Any(a => a.ContentType?.StartsWith("image/") == true);
                 bool hasReaction = m.Reactions.Count > 0;
@@ -137,7 +142,6 @@ namespace Discord_bot.Module
             _deleteStarts.TryRemove(Context.User.Id, out _);
         }
 
-        // deleteago_listからの削除ボタン
         [ComponentInteraction("delago_rmv_*")]
         public async Task RemoveDeleteAgo(string channelId)
         {
