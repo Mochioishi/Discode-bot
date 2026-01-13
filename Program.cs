@@ -58,7 +58,7 @@ namespace DiscordBot
                 
                 // 1. ここにあなたのテストサーバーのIDを入れてください
                 // サーバー名を右クリックして「IDをコピー」で取得できます
-                ulong testGuildId = 123456789012345678; // ← ここを書き換える
+                ulong testGuildId = 1340424080138178653; // ← ここを書き換える
 
                 if (testGuildId != 0)
                 {
