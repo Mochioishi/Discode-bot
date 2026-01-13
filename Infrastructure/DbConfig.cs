@@ -1,30 +1,18 @@
-using Npgsql;
-using System;
+using MySqlConnector;
+using Microsoft.Extensions.Configuration;
 
-namespace DiscordBot.Infrastructure
+namespace Discord_bot.Infrastructure // ← ここを「Discord_bot」に統一
 {
-    public static class DbConfig
+    public class DbConfig
     {
-        public static string GetConnectionString()
+        private readonly string _connectionString;
+
+        public DbConfig(IConfiguration configuration)
         {
-            var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
-
-            if (string.IsNullOrEmpty(databaseUrl))
-            {
-                return "Host=localhost;Username=postgres;Password=password;Database=discord_bot";
-            }
-
-            try
-            {
-                var builder = new NpgsqlConnectionStringBuilder(databaseUrl);
-                builder.SslMode = SslMode.Disable;
-                builder.TrustServerCertificate = true;
-                return builder.ToString();
-            }
-            catch
-            {
-                return databaseUrl;
-            }
+            _connectionString = configuration.GetConnectionString("Default") 
+                               ?? "Server=localhost;Database=discord_bot;Uid=root;Pwd=password;";
         }
+
+        public MySqlConnection GetConnection() => new MySqlConnection(_connectionString);
     }
 }
