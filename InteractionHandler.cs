@@ -32,10 +32,12 @@ namespace Discord_bot
             _client.InteractionCreated += HandleInteraction;
             _client.Ready += OnReadyAsync;
 
-            // 各種イベントの紐付け
+            // プロセカ監視・リアクションロールのイベントを静的メソッドへ飛ばす
             _client.MessageReceived += (msg) => PrskModule.HandleMessageAsync(msg, _db, _client);
-            _client.ReactionAdded += (c, ch, r) => RoleGiveModule.HandleReactionAsync(c, r, true, _db);
-            _client.ReactionRemoved += (c, ch, r) => RoleGiveModule.HandleReactionAsync(c, r, false, _db);
+            
+            // 【修正箇所】RoleGiveModule ではなく RoleModule を使用
+            _client.ReactionAdded += (c, ch, r) => RoleModule.HandleReactionAsync(c, r, true, _db);
+            _client.ReactionRemoved += (c, ch, r) => RoleModule.HandleReactionAsync(c, r, false, _db);
         }
 
         private async Task OnReadyAsync()
@@ -60,7 +62,7 @@ namespace Discord_bot
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex);
+                Console.WriteLine($"[Interaction Error] {ex}");
             }
         }
     }
