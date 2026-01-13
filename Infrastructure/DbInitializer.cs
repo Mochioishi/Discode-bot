@@ -1,62 +1,75 @@
-using Npgsql;
-using System;
+using Dapper;
+using MySqlConnector;
 
-namespace DiscordBot.Infrastructure
+namespace Discord_bot.Infrastructure // 名前空間をプロジェクト設定に統一
 {
-    public static class DbInitializer
+    public class DbInitializer
     {
-        public static void Initialize()
+        private readonly DbConfig _db;
+
+        public DbInitializer(DbConfig db)
         {
-            using var conn = new NpgsqlConnection(DbConfig.GetConnectionString());
-            conn.Open();
+            _db = db;
+        }
 
-            using var cmd = new NpgsqlCommand();
-            cmd.Connection = conn;
+        public async Task InitializeAsync()
+        {
+            using var conn = _db.GetConnection();
 
-            // すべてのテーブルを「存在しない時だけ作る」設定に変更しました
-            cmd.CommandText = @"
-                -- 1. 自動削除テーブル
-                CREATE TABLE IF NOT EXISTS ""ScheduledDeletions"" (
-                    ""MessageId"" BIGINT PRIMARY KEY,
-                    ""ChannelId"" BIGINT NOT NULL,
-                    ""DeleteAt"" TIMESTAMP WITH TIME ZONE NOT NULL
+            // すべてのテーブルを MySQL 形式で作成
+            const string sql = @"
+                -- 1. 予約投稿用テーブル (bottext)
+                CREATE TABLE IF NOT EXISTS BotTextSchedules (
+                    Id INT AUTO_INCREMENT PRIMARY KEY,
+                    Text TEXT NOT NULL,
+                    Title VARCHAR(255),
+                    ScheduledTime VARCHAR(10) NOT NULL,
+                    IsEmbed BOOLEAN DEFAULT TRUE,
+                    ChannelId BIGINT NOT NULL,
+                    GuildId BIGINT NOT NULL
                 );
 
-                -- 2. リアクションロールテーブル
-                CREATE TABLE IF NOT EXISTS ""ReactionRoles"" (
-                    ""MessageId"" BIGINT,
-                    ""Emoji"" TEXT,
-                    ""RoleId"" BIGINT,
-                    PRIMARY KEY (""MessageId"", ""Emoji"")
+                -- 2. 自動削除設定用テーブル (deleteago)
+                CREATE TABLE IF NOT EXISTS DeleteConfigs (
+                    ChannelId BIGINT PRIMARY KEY,
+                    GuildId BIGINT NOT NULL,
+                    Days INT NOT NULL,
+                    ProtectType INT NOT NULL
                 );
 
-                -- 3. Botテキスト予約投稿用テーブル (BotTextSchedules)
-                -- 前回の統合版に合わせ、ChannelId カラムを含む最新構成で作成します
-                CREATE TABLE IF NOT EXISTS ""BotTextSchedules"" (
-                    ""Id"" SERIAL PRIMARY KEY,
-                    ""Text"" TEXT NOT NULL,
-                    ""Title"" TEXT,
-                    ""ScheduledTime"" TEXT NOT NULL,
-                    ""ShowTime"" BOOLEAN DEFAULT TRUE,
-                    ""ChannelId"" TEXT NOT NULL
+                -- 3. プロセカ監視設定用テーブル (prsk_roomid)
+                CREATE TABLE IF NOT EXISTS PrskSettings (
+                    MonitorChannelId BIGINT PRIMARY KEY,
+                    TargetChannelId BIGINT NOT NULL,
+                    Template VARCHAR(255) NOT NULL,
+                    GuildId BIGINT NOT NULL
                 );
 
-                -- 4. プロセカ監視設定用テーブル
-                CREATE TABLE IF NOT EXISTS ""PrskSettings"" (
-                    ""MonitorChannelId"" TEXT PRIMARY KEY,
-                    ""TargetChannelId"" TEXT NOT NULL,
-                    ""Template"" TEXT NOT NULL
+                -- 4. リアクションロール用テーブル (rolegive)
+                CREATE TABLE IF NOT EXISTS RoleGiveSettings (
+                    MessageId BIGINT PRIMARY KEY,
+                    EmojiName VARCHAR(255) NOT NULL,
+                    RoleId BIGINT NOT NULL,
+                    GuildId BIGINT NOT NULL
                 );
 
-                -- 5. 自動掃除設定用テーブル (deleteago)
-                CREATE TABLE IF NOT EXISTS ""AutoPurgeSettings"" (
-                    ""ChannelId"" TEXT PRIMARY KEY,
-                    ""DaysAgo"" INTEGER NOT NULL,
-                    ""ProtectionType"" TEXT NOT NULL
+                -- 5. 既存の予約削除用 (互換性維持が必要な場合)
+                CREATE TABLE IF NOT EXISTS ScheduledDeletions (
+                    MessageId BIGINT PRIMARY KEY,
+                    ChannelId BIGINT NOT NULL,
+                    DeleteAt DATETIME NOT NULL
                 );";
 
-            cmd.ExecuteNonQuery();
-            Console.WriteLine("--- Database initialized (Existing data preserved) ---");
+            try
+            {
+                await conn.ExecuteAsync(sql);
+                Console.WriteLine("[DB] --- Database initialized (Existing data preserved) ---");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DB] Initialization Error: {ex.Message}");
+                throw;
+            }
         }
     }
 }
