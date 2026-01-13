@@ -1,93 +1,51 @@
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
-using DiscordBot.Services;
+using Discord_bot;
+using Discord_bot.Infrastructure;
+using Discord_bot.Workers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System;
-using System.Threading.Tasks;
-using DiscordBot.Infrastructure;
-using DiscordBot.Workers;
 
-namespace DiscordBot
+var builder = Host.CreateApplicationBuilder(args);
+
+// --- 1. Discord Socket Client の設定 ---
+builder.Services.AddSingleton(new DiscordSocketConfig
 {
-    public class Program
+    // スラッシュコマンドには最低限以下が必要
+    GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.GuildMembers,
+    AlwaysDownloadUsers = true,
+    LogGatewayIntentWarnings = false
+});
+
+// --- 2. 各種サービスの登録 (DI) ---
+builder.Services.AddSingleton<DiscordSocketClient>();
+builder.Services.AddSingleton<InteractionService>();
+builder.Services.AddSingleton<InteractionHandler>();
+
+// データベース設定 (GitHubの既存クラス)
+builder.Services.AddSingleton<DbConfig>();
+builder.Services.AddSingleton<DbInitializer>();
+
+// バックグラウンドサービス (Botの起動管理と時報)
+builder.Services.AddHostedService<Worker>();
+builder.Services.AddHostedService<TimeSignalWorker>();
+
+var host = builder.Build();
+
+// --- 3. データベースの初期化実行 ---
+using (var scope = host.Services.CreateScope())
+{
+    var initializer = scope.ServiceProvider.GetRequiredService<DbInitializer>();
+    try 
     {
-        public static async Task Main(string[] args)
-        {
-            using IHost host = Host.CreateDefaultBuilder(args)
-                .ConfigureServices((hostContext, services) =>
-                {
-                    var config = new DiscordSocketConfig {
-                        GatewayIntents = GatewayIntents.AllUnprivileged 
-                                       | GatewayIntents.MessageContent 
-                                       | GatewayIntents.GuildMembers 
-                                       | GatewayIntents.GuildMessages 
-                                       | GatewayIntents.GuildMessageReactions,
-                        AlwaysDownloadUsers = true,
-                        MessageCacheSize = 100 
-                    };
-
-                    services.AddSingleton(new DiscordSocketClient(config));
-                    services.AddSingleton(x => new InteractionService(x.GetRequiredService<DiscordSocketClient>()));
-                    services.AddSingleton<InteractionHandler>();
-                    services.AddHostedService<TimeSignalWorker>();
-                    services.AddHostedService<Worker>();
-                })
-                .ConfigureHostOptions(options => {
-                    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
-                })
-                .Build();
-
-            // 1. データベースの初期化
-            try {
-                DbInitializer.Initialize();
-                Console.WriteLine("Database initialized.");
-            } catch (Exception ex) {
-                Console.WriteLine($"DB Initialization Error: {ex.Message}");
-            }
-
-            var client = host.Services.GetRequiredService<DiscordSocketClient>();
-            var handler = host.Services.GetRequiredService<InteractionHandler>();
-            
-            // 2. InteractionHandler（モジュール）の読み込み
-            await handler.InitializeAsync();
-
-            // 3. コマンド登録イベントの定義
-            client.Ready += async () =>
-            {
-                var interactionService = host.Services.GetRequiredService<InteractionService>();
-
-                // 環境変数 "SERVER_ID" から取得
-                string? guildIdStr = Environment.GetEnvironmentVariable("SERVER_ID");
-                
-                if (ulong.TryParse(guildIdStr, out ulong testGuildId))
-                {
-                    // ギルド（サーバー）に対してコマンドを即時登録
-                    // これにより、古いスラッシュコマンドが新しいものに上書きされます
-                    await interactionService.RegisterCommandsToGuildAsync(testGuildId);
-                    Console.WriteLine($"Commands synchronization completed for Guild: {testGuildId}");
-                }
-                else
-                {
-                    // SERVER_IDがない場合はグローバル登録
-                    await interactionService.RegisterCommandsGloballyAsync();
-                    Console.WriteLine("Commands registered globally (may take up to 1 hour).");
-                }
-            };
-
-            // 4. ボットの起動
-            string? token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
-            if (!string.IsNullOrWhiteSpace(token)) {
-                await client.LoginAsync(TokenType.Bot, token);
-                await client.StartAsync();
-                
-                // ホストの開始（プログラムの維持）
-                await host.RunAsync();
-            }
-            else {
-                Console.WriteLine("CRITICAL ERROR: DISCORD_TOKEN is missing.");
-            }
-        }
+        await initializer.InitializeAsync();
+        Console.WriteLine("[DB] Database initialization completed.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[DB] Initialization failed: {ex.Message}");
     }
 }
+
+await host.RunAsync();
