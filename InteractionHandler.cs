@@ -34,8 +34,8 @@ namespace Discord_bot
             _client.MessageReceived += (msg) => PrskModule.HandleMessageAsync(msg, _db, _client);
 
             // リアクションロール用
-            _client.ReactionAdded += (c, ch, r) => RoleModule.HandleReactionAsync(c, r, true, _db);
-            _client.ReactionRemoved += (c, ch, r) => RoleModule.HandleReactionAsync(c, r, false, _db);
+            _client.ReactionAdded += (c, ch, r) => RoleGiveModule.HandleReactionAsync(c, r, true, _db);
+            _client.ReactionRemoved += (c, ch, r) => RoleGiveModule.HandleReactionAsync(c, r, false, _db);
         }
 
         private async Task OnReadyAsync()
