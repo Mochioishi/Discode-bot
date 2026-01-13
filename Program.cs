@@ -39,6 +39,7 @@ namespace DiscordBot
                 })
                 .Build();
 
+            // 1. データベースの初期化
             try {
                 DbInitializer.Initialize();
                 Console.WriteLine("Database initialized.");
@@ -48,39 +49,44 @@ namespace DiscordBot
 
             var client = host.Services.GetRequiredService<DiscordSocketClient>();
             var handler = host.Services.GetRequiredService<InteractionHandler>();
+            
+            // 2. InteractionHandler（モジュール）の読み込み
             await handler.InitializeAsync();
 
+            // 3. コマンド登録イベントの定義
             client.Ready += async () =>
             {
                 var interactionService = host.Services.GetRequiredService<InteractionService>();
 
-                // --- 【修正箇所】即時反映のための設定 ---
+                // 環境変数 "SERVER_ID" から取得
+                string? guildIdStr = Environment.GetEnvironmentVariable("SERVER_ID");
                 
-                // 1. ここにあなたのテストサーバーのIDを入れてください
-                // サーバー名を右クリックして「IDをコピー」で取得できます
-                ulong testGuildId = 1340424080138178653; // ← ここを書き換える
-
-                if (testGuildId != 0)
+                if (ulong.TryParse(guildIdStr, out ulong testGuildId))
                 {
-                    // 古いギルドコマンドを一度クリアして再登録（一番確実な方法）
+                    // ギルド（サーバー）に対してコマンドを即時登録
+                    // これにより、古いスラッシュコマンドが新しいものに上書きされます
                     await interactionService.RegisterCommandsToGuildAsync(testGuildId);
-                    Console.WriteLine($"Commands registered to guild: {testGuildId}");
+                    Console.WriteLine($"Commands synchronization completed for Guild: {testGuildId}");
                 }
-
-                // グローバル登録は反映が遅いため、開発中はコメントアウト推奨
-                // await interactionService.RegisterCommandsGloballyAsync();
-                
-                // --------------------------------------
+                else
+                {
+                    // SERVER_IDがない場合はグローバル登録
+                    await interactionService.RegisterCommandsGloballyAsync();
+                    Console.WriteLine("Commands registered globally (may take up to 1 hour).");
+                }
             };
 
+            // 4. ボットの起動
             string? token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
             if (!string.IsNullOrWhiteSpace(token)) {
                 await client.LoginAsync(TokenType.Bot, token);
                 await client.StartAsync();
+                
+                // ホストの開始（プログラムの維持）
                 await host.RunAsync();
             }
             else {
-                Console.WriteLine("DISCORD_TOKEN is missing.");
+                Console.WriteLine("CRITICAL ERROR: DISCORD_TOKEN is missing.");
             }
         }
     }
