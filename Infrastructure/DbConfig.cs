@@ -1,6 +1,5 @@
 using MySqlConnector;
 using Microsoft.Extensions.Configuration;
-using System;
 
 namespace Discord_bot.Infrastructure
 {
@@ -14,17 +13,10 @@ namespace Discord_bot.Infrastructure
 
             if (!string.IsNullOrEmpty(rawUrl) && rawUrl.StartsWith("mysql://"))
             {
-                // mysql://user:password@host:port/database 形式を変換
                 var uri = new Uri(rawUrl);
                 var userInfo = uri.UserInfo.Split(':');
-                var user = userInfo[0];
-                var password = userInfo.Length > 1 ? userInfo[1] : "";
-                var host = uri.Host;
-                var port = uri.Port;
-                var database = uri.AbsolutePath.Trim('/');
-
-                // Render/Railway等では SSL Mode=Required が必要な場合が多いです
-                _connectionString = $"Server={host};Port={port};Database={database};Uid={user};Pwd={password};SSL Mode=Required;AllowPublicKeyRetrieval=True;";
+                _connectionString = $"Server={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.Trim('/')};Uid={userInfo[0]};Pwd={userInfo[1]};SSL Mode=Required;AllowPublicKeyRetrieval=True;Charset=utf8mb4;";
+                Console.WriteLine($"[DB Config] Host: {uri.Host} Parsed.");
             }
             else
             {
