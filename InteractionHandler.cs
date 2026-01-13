@@ -1,54 +1,37 @@
-using System.Reflection;
-using Discord;
-using Discord.Interactions;
-using Discord.WebSocket;
-using Discord_bot.Module; // モジュールの参照
-using Discord_bot.Infrastructure;
+using MySqlConnector;
+using Microsoft.Extensions.Configuration;
+using System;
 
-namespace Discord_bot
+namespace Discord_bot.Infrastructure
 {
-    public class InteractionHandler
+    public class DbConfig
     {
-        private readonly DiscordSocketClient _client;
-        private readonly InteractionService _commands;
-        private readonly IServiceProvider _services;
-        private readonly DbConfig _db;
+        private readonly string _connectionString;
 
-        public InteractionHandler(DiscordSocketClient client, InteractionService commands, IServiceProvider services, DbConfig db)
+        public DbConfig(IConfiguration configuration)
         {
-            _client = client;
-            _commands = commands;
-            _services = services;
-            _db = db;
+            var rawUrl = configuration["DATABASE_URL"];
+
+            if (!string.IsNullOrEmpty(rawUrl) && rawUrl.StartsWith("mysql://"))
+            {
+                // mysql://user:password@host:port/database 形式を変換
+                var uri = new Uri(rawUrl);
+                var userInfo = uri.UserInfo.Split(':');
+                var user = userInfo[0];
+                var password = userInfo.Length > 1 ? userInfo[1] : "";
+                var host = uri.Host;
+                var port = uri.Port;
+                var database = uri.AbsolutePath.Trim('/');
+
+                // Render/Railway等では SSL Mode=Required が必要な場合が多いです
+                _connectionString = $"Server={host};Port={port};Database={database};Uid={user};Pwd={password};SSL Mode=Required;AllowPublicKeyRetrieval=True;";
+            }
+            else
+            {
+                _connectionString = configuration.GetConnectionString("Default") ?? "";
+            }
         }
 
-        public async Task InitializeAsync()
-        {
-            await _commands.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
-
-            // イベントの紐付け
-            _client.InteractionCreated += HandleInteraction;
-            _client.Ready += OnReadyAsync;
-
-            // プロセカ監視用
-            _client.MessageReceived += (msg) => PrskModule.HandleMessageAsync(msg, _db, _client);
-
-            // リアクションロール用
-            _client.ReactionAdded += (c, ch, r) => RoleGiveModule.HandleReactionAsync(c, r, true, _db);
-            _client.ReactionRemoved += (c, ch, r) => RoleGiveModule.HandleReactionAsync(c, r, false, _db);
-        }
-
-        private async Task OnReadyAsync()
-        {
-            // スラッシュコマンドをDiscordに登録
-            await _commands.RegisterCommandsGloballyAsync();
-            Console.WriteLine("[Ready] Slash commands registered.");
-        }
-
-        private async Task HandleInteraction(SocketInteraction interaction)
-        {
-            var context = new SocketInteractionContext(_client, interaction);
-            await _commands.ExecuteCommandAsync(context, _services);
-        }
+        public MySqlConnection GetConnection() => new MySqlConnection(_connectionString);
     }
 }
