@@ -1,61 +1,87 @@
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
-using DiscordBot.Infrastructure;
-using Npgsql;
-using System;
-using System.Threading.Tasks;
+using Discord_bot.Infrastructure;
+using Dapper;
+using System.Collections.Concurrent;
 
-namespace DiscordBot.Modules
+namespace Discord_bot.Module
 {
-    public class RoleModule : InteractionModuleBase<SocketInteractionContext>
+    public class RoleGiveModule : InteractionModuleBase<SocketInteractionContext>
     {
+        private readonly DbConfig _db;
         private readonly DiscordSocketClient _client;
-        private readonly string _conn;
 
-        public RoleModule(DiscordSocketClient client)
+        // 「誰がどのロールを設定中か」を一時的に保持する辞書
+        private static readonly ConcurrentDictionary<ulong, ulong> _pendingSetups = new();
+
+        public RoleGiveModule(DbConfig db, DiscordSocketClient client)
         {
+            _db = db;
             _client = client;
-            _conn = DbConfig.GetConnectionString();
-            _client.ReactionAdded += OnReactionAdded;
-            _client.ReactionRemoved += OnReactionRemoved;
         }
 
-        [SlashCommand("rolegive", "リアクションでロール付与設定")]
-        public async Task RoleGive(string text, IRole role, string emoji)
+        [SlashCommand("rolegive", "リアクションロール設定を開始します")]
+        public async Task StartRoleGive(
+            [Summary("role", "付与・剥奪するロール")] IRole role)
         {
-            var eb = new EmbedBuilder().WithDescription(text).WithFooter($"リアクション {emoji} で @{role.Name} を付与").WithColor(Color.Green).Build();
-            await RespondAsync("作成中...", ephemeral: true);
-            var msg = await Context.Channel.SendMessageAsync(embed: eb);
-            
-            if (Emoji.TryParse(emoji, out var e1)) await msg.AddReactionAsync(e1);
-            else if (Emote.TryParse(emoji, out var e2)) await msg.AddReactionAsync(e2);
+            // 実行したユーザーIDと、付与したいロールIDを紐付け
+            _pendingSetups[Context.User.Id] = role.Id;
 
-            using var conn = new NpgsqlConnection(_conn); await conn.OpenAsync();
-            using var cmd = new NpgsqlCommand(@"INSERT INTO ""ReactionRoles"" (""MessageId"", ""Emoji"", ""RoleId"") VALUES (@mid, @emo, @rid)", conn);
-            cmd.Parameters.AddWithValue("mid", (long)msg.Id);
-            cmd.Parameters.AddWithValue("emo", emoji);
-            cmd.Parameters.AddWithValue("rid", (long)role.Id);
-            await cmd.ExecuteNonQueryAsync();
-            await FollowupAsync("✅ 作成完了", ephemeral: true);
+            await RespondAsync(
+                $"⚙️ **セットアップ開始**\n" +
+                $"1. ロールを紐付けたい**既存のメッセージ**にリアクションしてください。\n" +
+                $"2. そのリアクションした絵文字がそのまま登録されます。\n" +
+                $"※キャンセルする場合は `/rolegive_list` を確認してください。", 
+                ephemeral: true);
         }
 
-        private async Task OnReactionAdded(Cacheable<IUserMessage, ulong> c, Cacheable<IMessageChannel, ulong> ch, SocketReaction r) => await Handle(r, true);
-        private async Task OnReactionRemoved(Cacheable<IUserMessage, ulong> c, Cacheable<IMessageChannel, ulong> ch, SocketReaction r) => await Handle(r, false);
+        // --- 以下、イベント処理ロジック ---
 
-        private async Task Handle(SocketReaction r, bool add)
+        public static async Task HandleReactionAsync(Cacheable<IUserMessage, ulong> cache, SocketReaction reaction, bool isAdded, DbConfig db)
         {
-            if (r.User.Value.IsBot) return;
-            using var conn = new NpgsqlConnection(_conn); await conn.OpenAsync();
-            using var cmd = new NpgsqlCommand(@"SELECT ""RoleId"" FROM ""ReactionRoles"" WHERE ""MessageId"" = @mid AND ""Emoji"" = @emo", conn);
-            cmd.Parameters.AddWithValue("mid", (long)r.MessageId);
-            cmd.Parameters.AddWithValue("emo", r.Emote.ToString());
-            var res = await cmd.ExecuteScalarAsync();
-            if (res != null)
+            if (reaction.User.Value.IsBot) return;
+
+            // 1. セットアップ中（新規登録）かどうかの判定
+            if (isAdded && _pendingSetups.TryRemove(reaction.UserId, out var roleId))
             {
-                var user = r.User.Value as IGuildUser;
-                var role = user?.Guild.GetRole((ulong)(long)res);
-                if (user != null && role != null) { if (add) await user.AddRoleAsync(role); else await user.RemoveRoleAsync(role); }
+                using var conn = db.GetConnection();
+                const string sql = @"
+                    INSERT INTO RoleGiveSettings (MessageId, EmojiName, RoleId, GuildId) 
+                    VALUES (@mid, @emo, @rid, @gid) 
+                    ON DUPLICATE KEY UPDATE RoleId = @rid, EmojiName = @emo";
+
+                await conn.ExecuteAsync(sql, new
+                {
+                    mid = reaction.MessageId,
+                    emo = reaction.Emote.ToString(),
+                    rid = roleId,
+                    gid = (reaction.Channel as SocketGuildChannel)?.Guild.Id
+                });
+
+                // 通知を送る（DMまたはチャンネル）
+                var user = reaction.User.Value;
+                await user.SendMessageAsync($"✅ 設定完了: メッセージ `{reaction.MessageId}` に絵文字 {reaction.Emote} でロールを付与するように設定しました。");
+                return;
+            }
+
+            // 2. 通常のロール付与・剥奪処理
+            using (var conn = db.GetConnection())
+            {
+                const string sql = "SELECT RoleId FROM RoleGiveSettings WHERE MessageId = @mid AND EmojiName = @emo";
+                var dbRoleId = await conn.QueryFirstOrDefaultAsync<ulong?>(sql, new { mid = reaction.MessageId, emo = reaction.Emote.ToString() });
+
+                if (dbRoleId.HasValue)
+                {
+                    var guildUser = (reaction.Channel as SocketGuildChannel)?.Guild.GetUser(reaction.UserId);
+                    if (guildUser == null) return;
+
+                    var role = guildUser.Guild.GetRole(dbRoleId.Value);
+                    if (role == null) return;
+
+                    if (isAdded) await guildUser.AddRoleAsync(role);
+                    else await guildUser.RemoveRoleAsync(role);
+                }
             }
         }
     }
