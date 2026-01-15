@@ -1,15 +1,20 @@
 using Dapper;
+using System.Threading.Tasks;
 
 namespace Discord_bot.Infrastructure
 {
-    public static class DbInitializer
+    // static を外して普通のクラスにする
+    public class DbInitializer
     {
-        public static void Initialize(DbConfig db)
-        {
-            using var conn = db.GetConnection();
+        private readonly DbConfig _db;
+        public DbInitializer(DbConfig db) => _db = db;
 
-            // --- RoleGiveSettings テーブルの作成とカラム追加 ---
-            conn.Execute(@"
+        public async Task InitializeAsync()
+        {
+            using var conn = _db.GetConnection();
+
+            // 1. RoleGiveSettings テーブルの作成
+            await conn.ExecuteAsync(@"
                 CREATE TABLE IF NOT EXISTS RoleGiveSettings (
                     MessageId BIGINT PRIMARY KEY,
                     EmojiName TEXT NOT NULL,
@@ -17,8 +22,8 @@ namespace Discord_bot.Infrastructure
                     GuildId BIGINT NOT NULL
                 )");
 
-            // ChannelId カラムが存在しない場合のみ追加する（PostgreSQL用）
-            conn.Execute(@"
+            // 2. ChannelId カラムの追加チェック（PostgreSQL用）
+            await conn.ExecuteAsync(@"
                 DO $$ 
                 BEGIN 
                     IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
@@ -27,8 +32,8 @@ namespace Discord_bot.Infrastructure
                     END IF; 
                 END $$;");
 
-            // --- PrskSettings (プロセカ) ---
-            conn.Execute(@"
+            // 3. その他のテーブル作成
+            await conn.ExecuteAsync(@"
                 CREATE TABLE IF NOT EXISTS PrskSettings (
                     MonitorChannelId BIGINT PRIMARY KEY,
                     TargetChannelId BIGINT NOT NULL,
@@ -36,8 +41,7 @@ namespace Discord_bot.Infrastructure
                     GuildId BIGINT NOT NULL
                 )");
 
-            // --- BotTextSchedules (予約投稿) ---
-            conn.Execute(@"
+            await conn.ExecuteAsync(@"
                 CREATE TABLE IF NOT EXISTS BotTextSchedules (
                     Id SERIAL PRIMARY KEY,
                     Text TEXT NOT NULL,
@@ -48,8 +52,7 @@ namespace Discord_bot.Infrastructure
                     GuildId BIGINT NOT NULL
                 )");
 
-            // --- DeleteConfigs (自動削除) ---
-            conn.Execute(@"
+            await conn.ExecuteAsync(@"
                 CREATE TABLE IF NOT EXISTS DeleteConfigs (
                     ChannelId BIGINT PRIMARY KEY,
                     GuildId BIGINT NOT NULL,
