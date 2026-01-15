@@ -3,6 +3,9 @@ using Discord.Interactions;
 using Discord_bot.Infrastructure;
 using Dapper;
 using System.Collections.Concurrent;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace Discord_bot.Module
 {
@@ -21,30 +24,49 @@ namespace Discord_bot.Module
             [Summary("days", "何日前までのメッセージを残すか")] 
             [Choice("1日前", 1), Choice("2日前", 2), Choice("3日前", 3), Choice("7日前", 7)] int days,
             [Summary("protect", "削除から保護する対象")]
-            [Choice("なし", 0), Choice("画像あり", 1), Choice("リアクションあり", 2), Choice("画像またはリアクションあり", 3)] int protect)
+            [Choice("なし", 0), Choice("画像あり", 1), Choice("リアクションあり", 2), Choice("画像またはリアクションあり", 3)] int protect = 0)
         {
-            using var conn = _db.GetConnection();
-            const string sql = @"
-                INSERT INTO DeleteConfigs (ChannelId, GuildId, Days, ProtectType) 
-                VALUES (@cid, @gid, @d, @p) 
-                ON DUPLICATE KEY UPDATE Days = @d, ProtectType = @p";
+            await DeferAsync(ephemeral: true);
 
-            await conn.ExecuteAsync(sql, new { cid = Context.Channel.Id, gid = Context.Guild.Id, d = days, p = protect });
-            
-            string pText = protect switch { 1 => "画像", 2 => "リアクション", 3 => "画像/リアクション", _ => "なし" };
-            await RespondAsync($"✅ 設定完了: {days}日以上前のメッセージを毎日午前4時に削除します。(保護: {pText})", ephemeral: true);
+            try
+            {
+                using var conn = _db.GetConnection();
+                const string sql = @"
+                    INSERT INTO DeleteConfigs (ChannelId, GuildId, Days, ProtectType) 
+                    VALUES (@cid, @gid, @d, @p) 
+                    ON CONFLICT (ChannelId) 
+                    DO UPDATE SET Days = @d, ProtectType = @p";
+
+                await conn.ExecuteAsync(sql, new { 
+                    cid = (long)Context.Channel.Id, 
+                    gid = (long)Context.Guild.Id, 
+                    d = days, 
+                    p = protect 
+                });
+                
+                string pText = protect switch { 1 => "画像", 2 => "リアクション", 3 => "画像/リアクション", _ => "なし" };
+                await FollowupAsync($"✅ 設定完了: {days}日以上前のメッセージを毎日午前4時に削除します。(保護: {pText})", ephemeral: true);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DeleteAgo Error] {ex}");
+                await FollowupAsync("❌ 設定の保存中にエラーが発生しました", ephemeral: true);
+            }
         }
 
         [SlashCommand("deleteago_list", "自動削除設定の一覧表示")]
         public async Task DeleteAgoList()
         {
+            await DeferAsync(ephemeral: true);
+
             using var conn = _db.GetConnection();
             const string sql = "SELECT * FROM DeleteConfigs WHERE GuildId = @gid";
-            var configs = await conn.QueryAsync(sql, new { gid = Context.Guild.Id });
+            // PostgreSQLではカラム名が小文字で返ることがあるため、dynamicで受ける
+            var configs = (await conn.QueryAsync(sql, new { gid = (long)Context.Guild.Id })).ToList();
 
             if (!configs.Any())
             {
-                await RespondAsync("自動削除が設定されているチャンネルはありません。", ephemeral: true);
+                await FollowupAsync("自動削除が設定されているチャンネルはありません", ephemeral: true);
                 return;
             }
 
@@ -53,17 +75,21 @@ namespace Discord_bot.Module
 
             foreach (var c in configs)
             {
-                // 【修正箇所】SocketGuild では GetChannel (同期) を使用します
-                var channel = Context.Guild.GetChannel((ulong)c.ChannelId);
-                string channelName = channel?.Name ?? "不明なチャンネル";
+                // dynamic型のプロパティ名は大文字小文字を区別しないか、小文字でアクセス
+                var channelId = (ulong)(long)c.channelid;
+                var days = (int)c.days;
+                var protectType = (int)c.protecttype;
 
-                string pText = (int)c.ProtectType switch { 1 => "画像", 2 => "リアクション", 3 => "画像/リアクション", _ => "なし" };
-                embed.AddField($"#{channelName}", $"{c.Days}日前を削除 / 保護: {pText}");
+                var channel = Context.Guild.GetChannel(channelId);
+                string channelName = channel?.Name ?? $"ID:{channelId}";
+
+                string pText = protectType switch { 1 => "画像", 2 => "リアクション", 3 => "画像/リアクション", _ => "なし" };
+                embed.AddField($"#{channelName}", $"{days}日前を削除 / 保護: {pText}");
                 
-                builder.WithButton($"設定削除: #{channelName}", $"delago_rmv_{c.ChannelId}", ButtonStyle.Danger);
+                builder.WithButton($"設定削除: #{channelName}", $"delago_rmv_{channelId}", ButtonStyle.Danger);
             }
 
-            await RespondAsync(embed: embed.Build(), components: builder.Build(), ephemeral: true);
+            await FollowupAsync(embed: embed.Build(), components: builder.Build(), ephemeral: true);
         }
 
         // --- 2. 右クリック範囲削除 (Context Menu) ---
@@ -72,7 +98,7 @@ namespace Discord_bot.Module
         public async Task SetRangeStart(IMessage msg)
         {
             _deleteStarts[Context.User.Id] = msg.Id;
-            await RespondAsync("📍 開始地点を記憶しました。終了したいメッセージで「🚩 終了場所」を選んでください。", ephemeral: true);
+            await RespondAsync("📍 開始地点を記憶しました。", ephemeral: true);
         }
 
         [MessageCommand("🚩 終了場所")]
@@ -101,53 +127,66 @@ namespace Discord_bot.Module
         {
             await DeferAsync(ephemeral: true);
             
-            ulong startId = ulong.Parse(startIdStr);
-            ulong endId = ulong.Parse(endIdStr);
-            int protect = int.Parse(selectedValues[0]);
-
-            // IDを比較して範囲を特定
-            var minId = Math.Min(startId, endId);
-            var maxId = Math.Max(startId, endId);
-
-            // メッセージ取得（指定メッセージの後、maxIdまでを取得）
-            var messages = await Context.Channel.GetMessagesAsync(minId, Direction.After, 100).FlattenAsync();
-            var targetMsgs = messages.Where(m => m.Id <= maxId).ToList();
-            
-            // 開始メッセージ自体も追加
-            var startMsg = await Context.Channel.GetMessageAsync(minId);
-            if (startMsg != null) targetMsgs.Add(startMsg);
-            
-            // 終了メッセージ自体も追加（既に含まれている場合が多いが念のため）
-            var endMsg = await Context.Channel.GetMessageAsync(maxId);
-            if (endMsg != null && !targetMsgs.Any(m => m.Id == maxId)) targetMsgs.Add(endMsg);
-
-            var toDelete = targetMsgs.Where(m => {
-                bool hasImage = m.Attachments.Any(a => a.ContentType?.StartsWith("image/") == true);
-                bool hasReaction = m.Reactions.Count > 0;
-
-                return protect switch {
-                    1 => !hasImage,
-                    2 => !hasReaction,
-                    3 => !hasImage && !hasReaction,
-                    _ => true
-                };
-            }).ToList();
-
-            if (Context.Channel is ITextChannel ch)
+            try
             {
-                await ch.DeleteMessagesAsync(toDelete);
-                await FollowupAsync($"🗑️ {toDelete.Count}件のメッセージを削除しました。", ephemeral: true);
+                ulong startId = ulong.Parse(startIdStr);
+                ulong endId = ulong.Parse(endIdStr);
+                int protect = int.Parse(selectedValues[0]);
+
+                var minId = Math.Min(startId, endId);
+                var maxId = Math.Max(startId, endId);
+
+                // メッセージ取得
+                var messages = await Context.Channel.GetMessagesAsync(minId, Direction.After, 100).FlattenAsync();
+                var targetMsgs = messages.Where(m => m.Id <= maxId).ToList();
+                
+                var startMsg = await Context.Channel.GetMessageAsync(minId);
+                if (startMsg != null) targetMsgs.Add(startMsg);
+                
+                if (!targetMsgs.Any(m => m.Id == maxId))
+                {
+                    var endMsg = await Context.Channel.GetMessageAsync(maxId);
+                    if (endMsg != null) targetMsgs.Add(endMsg);
+                }
+
+                var toDelete = targetMsgs.Where(m => {
+                    bool hasImage = m.Attachments.Any(a => a.ContentType?.StartsWith("image/") == true);
+                    bool hasReaction = m.Reactions.Count > 0;
+
+                    return protect switch {
+                        1 => !hasImage,
+                        2 => !hasReaction,
+                        3 => !hasImage && !hasReaction,
+                        _ => true
+                    };
+                }).ToList();
+
+                if (Context.Channel is ITextChannel ch && toDelete.Any())
+                {
+                    await ch.DeleteMessagesAsync(toDelete);
+                    await FollowupAsync($"🗑️ {toDelete.Count}件のメッセージを削除", ephemeral: true);
+                }
+                else
+                {
+                    await FollowupAsync("削除対象のメッセージが見つかりませんでした", ephemeral: true);
+                }
+                
+                _deleteStarts.TryRemove(Context.User.Id, out _);
             }
-            
-            _deleteStarts.TryRemove(Context.User.Id, out _);
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[RangeDelete Error] {ex}");
+                await FollowupAsync("❌ 削除中にエラーが発生しました。メッセージが古すぎる（2週間以上前）可能性があります", ephemeral: true);
+            }
         }
 
         [ComponentInteraction("delago_rmv_*")]
         public async Task RemoveDeleteAgo(string channelId)
         {
+            await DeferAsync(ephemeral: true);
             using var conn = _db.GetConnection();
-            await conn.ExecuteAsync("DELETE FROM DeleteConfigs WHERE ChannelId = @cid", new { cid = ulong.Parse(channelId) });
-            await RespondAsync("✅ 自動削除設定を解除しました。", ephemeral: true);
+            await conn.ExecuteAsync("DELETE FROM DeleteConfigs WHERE ChannelId = @cid", new { cid = long.Parse(channelId) });
+            await FollowupAsync("✅ 自動削除設定を解除しました", ephemeral: true);
         }
     }
 }
