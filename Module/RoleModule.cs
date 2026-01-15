@@ -5,6 +5,8 @@ using Discord_bot.Infrastructure;
 using Dapper;
 using System.Collections.Concurrent;
 using System.Text;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace Discord_bot.Module
 {
@@ -20,7 +22,6 @@ namespace Discord_bot.Module
         public async Task StartRoleGive(
             [Summary("role", "付与・剥奪するロール")] IRole role)
         {
-            // 実行したユーザーを待機状態にする
             _pendingSetups[Context.User.Id] = role.Id;
 
             await RespondAsync(
@@ -31,16 +32,17 @@ namespace Discord_bot.Module
                 ephemeral: true);
         }
 
-        [SlashCommand("rolegive_list", "設定済みのリアクションロール一覧を表示・削除します")]
+        [SlashCommand("rolegive_list", "設定済みのリアクションロール一覧を表示")]
         public async Task ListRoleGive()
         {
+            await DeferAsync(ephemeral: true);
             using var conn = _db.GetConnection();
             const string sql = "SELECT * FROM RoleGiveSettings WHERE GuildId = @gid";
-            var settings = (await conn.QueryAsync(sql, new { gid = Context.Guild.Id })).ToList();
+            var settings = (await conn.QueryAsync(sql, new { gid = (long)Context.Guild.Id })).ToList();
 
             if (!settings.Any())
             {
-                await RespondAsync("現在設定されているリアクションロールはありません。", ephemeral: true);
+                await FollowupAsync("現在設定されているリアクションロールはありません。", ephemeral: true);
                 return;
             }
 
@@ -49,26 +51,30 @@ namespace Discord_bot.Module
 
             foreach (var s in settings)
             {
-                sb.AppendLine($"MSG: `{s.MessageId}` | {s.EmojiName} → <@&{s.RoleId}>");
-                // ボタンIDにメッセージIDを含めて削除可能にする
-                builder.WithButton($"削除: {s.MessageId}", $"rg_del_{s.MessageId}", ButtonStyle.Danger);
+                // PostgreSQL小文字対策
+                var mid = (ulong)(long)s.messageid;
+                var rid = (ulong)(long)s.roleid;
+                var emo = (string)s.emojiname;
+
+                sb.AppendLine($"MSG: `{mid}` | {emo} → <@&{rid}>");
+                builder.WithButton($"削除: {mid}", $"rg_del_{mid}", ButtonStyle.Danger);
             }
 
-            await RespondAsync(sb.ToString(), components: builder.Build(), ephemeral: true);
+            await FollowupAsync(sb.ToString(), components: builder.Build(), ephemeral: true);
         }
 
-        // 削除ボタンの処理
         [ComponentInteraction("rg_del_*")]
         public async Task DeleteHandler(string mid)
         {
+            await DeferAsync(ephemeral: true);
             using var conn = _db.GetConnection();
-            await conn.ExecuteAsync("DELETE FROM RoleGiveSettings WHERE MessageId = @mid", new { mid = ulong.Parse(mid) });
-            await RespondAsync($"✅ メッセージ `{mid}` の設定を削除しました。", ephemeral: true);
+            await conn.ExecuteAsync("DELETE FROM RoleGiveSettings WHERE MessageId = @mid", new { mid = long.Parse(mid) });
+            await FollowupAsync($"✅ メッセージ `{mid}` の設定を削除しました。", ephemeral: true);
         }
 
-        // --- イベントハンドラ (InteractionHandlerから呼び出す) ---
+        // --- イベントハンドラ ---
 
-        public static async Task HandleReactionAsync(Cacheable<IUserMessage, ulong> cache, SocketReaction reaction, bool isAdded, DbConfig db)
+        public static async Task HandleReactionAsync(Cacheable<IUserMessage, ulong> cache, Cacheable<IMessageChannel, ulong> channel, SocketReaction reaction, bool isAdded, DbConfig db)
         {
             if (reaction.User.Value.IsBot) return;
 
@@ -79,36 +85,40 @@ namespace Discord_bot.Module
                 const string sql = @"
                     INSERT INTO RoleGiveSettings (MessageId, EmojiName, RoleId, GuildId) 
                     VALUES (@mid, @emo, @rid, @gid) 
-                    ON DUPLICATE KEY UPDATE RoleId = @rid, EmojiName = @emo";
+                    ON CONFLICT (MessageId) 
+                    DO UPDATE SET RoleId = @rid, EmojiName = @emo";
+
+                var gid = (reaction.Channel as SocketGuildChannel)?.Guild.Id;
 
                 await conn.ExecuteAsync(sql, new
                 {
-                    mid = reaction.MessageId,
+                    mid = (long)reaction.MessageId,
                     emo = reaction.Emote.ToString(),
-                    rid = roleId,
-                    gid = (reaction.Channel as SocketGuildChannel)?.Guild.Id
+                    rid = (long)roleId,
+                    gid = (long?)gid
                 });
 
-                // Bot自身がメッセージに対象のリアクションを付ける (完了の合図)
                 var msg = await reaction.Channel.GetMessageAsync(reaction.MessageId) as IUserMessage;
                 if (msg != null) await msg.AddReactionAsync(reaction.Emote);
-
-                await reaction.User.Value.SendMessageAsync($"✅ 設定完了: メッセージ `{reaction.MessageId}` に {reaction.Emote} でロールを付与します。");
+                
+                // 設定者に通知（DM送信）
+                try { await reaction.User.Value.SendMessageAsync($"✅ 設定完了: メッセージ `{reaction.MessageId}` に {reaction.Emote} でロールを付与します。"); } catch { }
                 return;
             }
 
             // 2. 通常のロール付与・剥奪
             using (var conn = db.GetConnection())
             {
-                const string sql = "SELECT RoleId FROM RoleGiveSettings WHERE MessageId = @mid AND EmojiName = @emo";
-                var dbRoleId = await conn.QueryFirstOrDefaultAsync<ulong?>(sql, new { mid = reaction.MessageId, emo = reaction.Emote.ToString() });
+                const string sql = "SELECT roleid FROM RoleGiveSettings WHERE MessageId = @mid AND EmojiName = @emo";
+                var result = await conn.QueryFirstOrDefaultAsync(sql, new { mid = (long)reaction.MessageId, emo = reaction.Emote.ToString() });
 
-                if (dbRoleId.HasValue)
+                if (result != null)
                 {
+                    ulong dbRoleId = (ulong)(long)result.roleid;
                     var guildUser = (reaction.Channel as SocketGuildChannel)?.Guild.GetUser(reaction.UserId);
                     if (guildUser == null) return;
 
-                    var role = guildUser.Guild.GetRole(dbRoleId.Value);
+                    var role = guildUser.Guild.GetRole(dbRoleId);
                     if (role == null) return;
 
                     if (isAdded) await guildUser.AddRoleAsync(role);
