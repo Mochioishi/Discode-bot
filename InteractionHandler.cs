@@ -1,56 +1,51 @@
-using System.Reflection;
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
-using Discord_bot.Module;
-using Discord_bot.Infrastructure;
-using Microsoft.Extensions.Configuration;
+using System.Reflection;
 
 namespace Discord_bot
 {
     public class InteractionHandler
     {
         private readonly DiscordSocketClient _client;
-        private readonly InteractionService _commands;
+        private readonly InteractionService _interactionService;
         private readonly IServiceProvider _services;
-        private readonly DbConfig _db;
-        private readonly IConfiguration _config;
 
-        public InteractionHandler(DiscordSocketClient client, InteractionService commands, IServiceProvider services, DbConfig db, IConfiguration configuration)
+        public InteractionHandler(DiscordSocketClient client, InteractionService interactionService, IServiceProvider services)
         {
             _client = client;
-            _commands = commands;
+            _interactionService = interactionService;
             _services = services;
-            _db = db;
-            _config = configuration;
         }
 
         public async Task InitializeAsync()
         {
-            await _commands.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
-
+            await _interactionService.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
             _client.InteractionCreated += HandleInteraction;
-            _client.Ready += OnReadyAsync;
 
-            // プロセカ監視・リアクションロールのイベントを静的メソッドへ飛ばす
-            _client.MessageReceived += (msg) => PrskModule.HandleMessageAsync(msg, _db, _client);
-            
-            // 【修正箇所】RoleGiveModule ではなく RoleModule を使用
-            _client.ReactionAdded += (c, ch, r) => RoleModule.HandleReactionAsync(c, r, true, _db);
-            _client.ReactionRemoved += (c, ch, r) => RoleModule.HandleReactionAsync(c, r, false, _db);
+            // Readyイベントでコマンドを同期
+            _client.Ready += ReadyAsync;
         }
 
-        private async Task OnReadyAsync()
+        private async Task ReadyAsync()
         {
-            // 重複削除のため deleteMissing: true を使用
-            if (ulong.TryParse(_config["SERVER_ID"], out var guildId))
+            // 環境変数 SERVER_ID を取得
+            var serverIdStr = Environment.GetEnvironmentVariable("SERVER_ID");
+            
+            if (ulong.TryParse(serverIdStr, out ulong guildId))
             {
-                await _commands.RegisterCommandsToGuildAsync(guildId, deleteMissing: true);
+                // 1. 指定されたギルドにのみコマンドを登録（即時反映される）
+                await _interactionService.RegisterCommandsToGuildAsync(guildId);
                 Console.WriteLine($"[Ready] Registered to guild: {guildId}");
-            }
 
-            await _commands.RegisterCommandsGloballyAsync(deleteMissing: true);
-            Console.WriteLine("[Ready] Global commands synced.");
+                // 2. もし以前にグローバル登録してしまったものを消したい場合は、
+                // 一時的に以下を有効にして実行するとクリーンアップされます
+                // await _client.Rest.DeleteAllGlobalCommandsAsync();
+            }
+            else
+            {
+                Console.WriteLine("[Ready Warning] SERVER_ID is not set or invalid. Commands not registered.");
+            }
         }
 
         private async Task HandleInteraction(SocketInteraction interaction)
@@ -58,7 +53,7 @@ namespace Discord_bot
             try
             {
                 var context = new SocketInteractionContext(_client, interaction);
-                await _commands.ExecuteCommandAsync(context, _services);
+                await _interactionService.ExecuteCommandAsync(context, _services);
             }
             catch (Exception ex)
             {
