@@ -40,7 +40,7 @@ namespace Discord_bot.Module
                         await Context.Channel.SendMessageAsync(text);
                     }
 
-                    await FollowupAsync("✅ メッセージを即時送信しました。", ephemeral: true);
+                    await FollowupAsync("✅ メッセージを送信しました", ephemeral: true);
                     return;
                 }
 
@@ -60,7 +60,7 @@ namespace Discord_bot.Module
                 });
 
                 string type = isEmbed ? "埋め込み" : "通常";
-                await FollowupAsync($"✅ {time} に{type}メッセージを予約しました。", ephemeral: true);
+                await FollowupAsync($"✅ {time} に{type}メッセージを予約しました", ephemeral: true);
             }
             catch (Exception ex)
             {
