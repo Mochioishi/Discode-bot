@@ -2,6 +2,8 @@ using Discord;
 using Discord.Interactions;
 using Discord_bot.Infrastructure;
 using Dapper;
+using System;
+using System.Threading.Tasks;
 
 namespace Discord_bot.Module
 {
@@ -12,10 +14,10 @@ namespace Discord_bot.Module
 
         [SlashCommand("bottext", "Botに発言させます（時刻指定で予約可能）")]
         public async Task SetBotText(
-            [Summary("text", "送信する本文")] string text,
-            [Summary("is_embed", "埋め込みメッセージにするか")] bool isEmbed = false),
-            [Summary("title", "埋め込み時のタイトル")] string title = "",
-            [Summary("time", "送信時刻 (HH:mm) 未記入で即時送信")] string time = ""
+            [Summary("text", "送信本文")] string text,
+            [Summary("is_embed", "埋め込みメッセージ")] bool isEmbed = false,
+            [Summary("title", "タイトル")] string title = "",
+            [Summary("time", "送信時刻 (HH:mm)")] string time = "")
         {
             // 1. まず「考え中...」の状態にする（タイムアウト防止）
             await DeferAsync(ephemeral: true);
