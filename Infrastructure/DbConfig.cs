@@ -1,29 +1,51 @@
-using MySqlConnector;
-using Microsoft.Extensions.Configuration;
+using Npgsql;
+using System;
 
-namespace Discord_bot.Infrastructure
+namespace DiscordBot.Infrastructure
 {
-    public class DbConfig
+    public static class DbConfig
     {
-        private readonly string _connectionString;
-
-        public DbConfig(IConfiguration configuration)
+        public static string GetConnectionString()
         {
-            var rawUrl = configuration["DATABASE_URL"];
+            // Railwayの環境変数から DATABASE_URL を取得
+            var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
 
-            if (!string.IsNullOrEmpty(rawUrl) && rawUrl.StartsWith("mysql://"))
+            if (string.IsNullOrEmpty(databaseUrl))
             {
-                var uri = new Uri(rawUrl);
-                var userInfo = uri.UserInfo.Split(':');
-                _connectionString = $"Server={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.Trim('/')};Uid={userInfo[0]};Pwd={userInfo[1]};SSL Mode=Required;AllowPublicKeyRetrieval=True;Charset=utf8mb4;";
-                Console.WriteLine($"[DB Config] Host: {uri.Host} Parsed.");
+                // ローカル開発環境などで DATABASE_URL がない場合のフォールバック（必要に応じて）
+                return "Host=localhost;Database=discord_bot;Username=postgres;Password=password";
             }
-            else
+
+            try
             {
-                _connectionString = configuration.GetConnectionString("Default") ?? "";
+                // postgres://user:password@host:port/database 形式を解析
+                var uri = new Uri(databaseUrl);
+                var userInfo = uri.UserInfo.Split(':');
+
+                var builder = new NpgsqlConnectionStringBuilder
+                {
+                    Host = uri.Host,
+                    Port = uri.Port,
+                    Username = userInfo[0],
+                    Password = userInfo[1],
+                    Database = uri.LocalPath.TrimStart('/'),
+                    SslMode = SslMode.Require, // RailwayのPostgreSQLはSSL必須
+                    TrustServerCertificate = true // 証明書エラーを回避
+                };
+
+                return builder.ToString();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error parsing DATABASE_URL: {ex.Message}");
+                return null;
             }
         }
 
-        public MySqlConnection GetConnection() => new MySqlConnection(_connectionString);
+        // NpgsqlConnectionを返すヘルパーメソッド
+        public static NpgsqlConnection GetConnection()
+        {
+            return new NpgsqlConnection(GetConnectionString());
+        }
     }
 }
