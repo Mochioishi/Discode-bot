@@ -7,6 +7,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Linq;
 using System.Threading.Tasks;
+using System;
 
 namespace Discord_bot.Module
 {
@@ -14,6 +15,7 @@ namespace Discord_bot.Module
     {
         private readonly DbConfig _db;
         
+        // セットアップ待機中のユーザーと、その時のInteractionContextを保持
         public static readonly ConcurrentDictionary<ulong, (ulong RoleId, IInteractionContext Context)> _pendingSetups = new();
 
         public RoleModule(DbConfig db) => _db = db;
@@ -21,6 +23,7 @@ namespace Discord_bot.Module
         [SlashCommand("rolegive", "リアクションロール設定を開始します")]
         public async Task StartRoleGive([Summary("role", "付与・剥奪するロール")] IRole role)
         {
+            // ユーザーIDをキーにして、設定したいロールIDと現在のコンテキストを一時保存
             _pendingSetups[Context.User.Id] = (role.Id, Context);
 
             await RespondAsync(
@@ -37,6 +40,7 @@ namespace Discord_bot.Module
             await DeferAsync(ephemeral: true);
             using var conn = _db.GetConnection();
             
+            // ギルド内の全設定を取得
             var settings = (await conn.QueryAsync("SELECT * FROM RoleGiveSettings WHERE GuildId = @gid", new { gid = (long)Context.Guild.Id })).ToList();
 
             if (!settings.Any())
@@ -45,22 +49,31 @@ namespace Discord_bot.Module
                 return;
             }
 
-            var embed = new EmbedBuilder().WithTitle("🎭 リアクションロール一覧").WithColor(Color.Blue);
+            var embed = new EmbedBuilder()
+                .WithTitle("🎭 リアクションロール一覧")
+                .WithColor(Color.Blue);
+
             var builder = new ComponentBuilder();
 
             foreach (var s in settings)
             {
+                // PostgreSQLのカラム名小文字対策
                 var mid = (ulong)(long)s.messageid;
                 var rid = (ulong)(long)s.roleid;
                 var cid = (ulong)(long)(s.channelid ?? 0);
                 var emo = (string)s.emojiname;
 
+                // チャンネル名を取得
                 var channel = Context.Guild.GetChannel(cid);
                 string channelName = channel?.Name ?? "不明なch";
+
+                // ロール名を取得（メンション形式）
                 var role = Context.Guild.GetRole(rid);
                 string roleMention = role?.Mention ?? "不明なロール";
 
                 embed.AddField($"#{channelName}", $"{emo} → {roleMention}");
+                
+                // 削除ボタン
                 builder.WithButton($"設定削除: #{channelName}", $"rg_del_{mid}", ButtonStyle.Danger);
             }
 
@@ -75,7 +88,7 @@ namespace Discord_bot.Module
             using var conn = _db.GetConnection();
             long messageId = long.Parse(mid);
 
-            // 1. 削除前にDBから設定情報を取得（リアクションを外すため）
+            // 1. 削除前にDBから情報を取得（リアクションを外すため）
             var setting = await conn.QueryFirstOrDefaultAsync(
                 "SELECT channelid, emojiname FROM RoleGiveSettings WHERE MessageId = @mid", 
                 new { mid = messageId });
@@ -87,25 +100,24 @@ namespace Discord_bot.Module
                     ulong cId = (ulong)(long)setting.channelid;
                     string emojiStr = setting.emojiname;
 
-                    // チャンネルとメッセージを取得してリアクションを外す
-                    var channel = await Context.Guild.GetChannelAsync(cId) as IMessageChannel;
+                    // SocketGuild.GetChannel は同期メソッドなので Async は不要
+                    var channel = Context.Guild.GetChannel(cId) as IMessageChannel;
                     if (channel != null)
                     {
                         var msg = await channel.GetMessageAsync(ulong.Parse(mid)) as IUserMessage;
                         if (msg != null)
                         {
                             IEmote emote;
-                            // カスタム絵文字か標準絵文字かを判定してパース
                             if (Emote.TryParse(emojiStr, out var customEmote)) emote = customEmote;
                             else emote = new Emoji(emojiStr);
 
+                            // Botのリアクションを解除
                             await msg.RemoveReactionAsync(emote, Context.Client.CurrentUser);
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    // メッセージが既に消えている場合などは無視
                     Console.WriteLine($"[RoleGive Delete Info] リアクション解除スキップ: {ex.Message}");
                 }
             }
@@ -116,10 +128,12 @@ namespace Discord_bot.Module
             await FollowupAsync($"✅ 設定を解除し、Botのリアクションを削除しました。", ephemeral: true);
         }
 
+        // --- イベントハンドラ ---
         public static async Task HandleReactionAsync(Cacheable<IUserMessage, ulong> cache, Cacheable<IMessageChannel, ulong> channel, SocketReaction reaction, bool isAdded, DbConfig db)
         {
             if (reaction.User.Value.IsBot) return;
 
+            // 1. 新規登録モードの処理
             if (isAdded && _pendingSetups.TryRemove(reaction.UserId, out var setup))
             {
                 using var conn = db.GetConnection();
@@ -149,6 +163,7 @@ namespace Discord_bot.Module
                 return;
             }
 
+            // 2. 通常のロール付与・剥奪
             using (var conn = db.GetConnection())
             {
                 const string sql = "SELECT roleid FROM RoleGiveSettings WHERE MessageId = @mid AND EmojiName = @emo";
