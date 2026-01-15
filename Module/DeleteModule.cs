@@ -21,8 +21,7 @@ namespace Discord_bot.Module
 
         [SlashCommand("deleteago", "X日経過したメッセージを午前4時に自動削除する設定")]
         public async Task SetDeleteAgo(
-            [Summary("days", "何日前までのメッセージを残すか")] 
-            [Choice("1日前", 1), Choice("2日前", 2), Choice("3日前", 3), Choice("7日前", 7)] int days,
+            [Summary("days", "何日前までのメッセージを残すか（数値で入力）")] int days,
             [Summary("protect", "削除から保護する対象")]
             [Choice("なし", 0), Choice("画像あり", 1), Choice("リアクションあり", 2), Choice("画像またはリアクションあり", 3)] int protect = 0)
         {
@@ -30,6 +29,12 @@ namespace Discord_bot.Module
 
             try
             {
+                if (days <= 0)
+                {
+                    await FollowupAsync("❌ 日数は1日以上を指定してください。", ephemeral: true);
+                    return;
+                }
+
                 using var conn = _db.GetConnection();
                 const string sql = @"
                     INSERT INTO DeleteConfigs (ChannelId, GuildId, Days, ProtectType) 
@@ -45,7 +50,7 @@ namespace Discord_bot.Module
                 });
                 
                 string pText = protect switch { 1 => "画像", 2 => "リアクション", 3 => "画像/リアクション", _ => "なし" };
-                await FollowupAsync($"✅ 設定完了: {days}日以上前のメッセージを毎日午前4時に削除します。(保護: {pText})", ephemeral: true);
+                await FollowupAsync($"✅ 設定完了: **{days}日**以上前のメッセージを毎日午前4時に削除します。(保護: {pText})", ephemeral: true);
             }
             catch (Exception ex)
             {
@@ -61,7 +66,6 @@ namespace Discord_bot.Module
 
             using var conn = _db.GetConnection();
             const string sql = "SELECT * FROM DeleteConfigs WHERE GuildId = @gid";
-            // PostgreSQLではカラム名が小文字で返ることがあるため、dynamicで受ける
             var configs = (await conn.QueryAsync(sql, new { gid = (long)Context.Guild.Id })).ToList();
 
             if (!configs.Any())
@@ -75,7 +79,6 @@ namespace Discord_bot.Module
 
             foreach (var c in configs)
             {
-                // dynamic型のプロパティ名は大文字小文字を区別しないか、小文字でアクセス
                 var channelId = (ulong)(long)c.channelid;
                 var days = (int)c.days;
                 var protectType = (int)c.protecttype;
@@ -136,7 +139,6 @@ namespace Discord_bot.Module
                 var minId = Math.Min(startId, endId);
                 var maxId = Math.Max(startId, endId);
 
-                // メッセージ取得
                 var messages = await Context.Channel.GetMessagesAsync(minId, Direction.After, 100).FlattenAsync();
                 var targetMsgs = messages.Where(m => m.Id <= maxId).ToList();
                 
@@ -176,7 +178,7 @@ namespace Discord_bot.Module
             catch (Exception ex)
             {
                 Console.WriteLine($"[RangeDelete Error] {ex}");
-                await FollowupAsync("❌ 削除中にエラーが発生しました。メッセージが古すぎる（2週間以上前）可能性があります", ephemeral: true);
+                await FollowupAsync("❌ 削除中にエラーが発生しました（2週間以上前の可能性があります）", ephemeral: true);
             }
         }
 
