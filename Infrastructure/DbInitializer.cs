@@ -14,12 +14,7 @@ namespace Discord_bot.Infrastructure
         {
             try 
             {
-                // DbConfig で作成した GetConnection() (NpgsqlConnection) を使用
                 using var conn = _db.GetConnection();
-                
-                // PostgreSQL 用の SQL 文
-                // 1. AUTO_INCREMENT -> SERIAL
-                // 2. BIGINT PRIMARY KEY はそのまま使用可能
                 const string sql = @"
                     CREATE TABLE IF NOT EXISTS BotTextSchedules (
                         Id SERIAL PRIMARY KEY,
@@ -30,37 +25,30 @@ namespace Discord_bot.Infrastructure
                         ChannelId BIGINT NOT NULL,
                         GuildId BIGINT NOT NULL
                     );
-
                     CREATE TABLE IF NOT EXISTS DeleteConfigs (
                         ChannelId BIGINT PRIMARY KEY,
                         GuildId BIGINT NOT NULL,
                         Days INT NOT NULL,
                         ProtectType INT NOT NULL
                     );
-
                     CREATE TABLE IF NOT EXISTS PrskSettings (
                         MonitorChannelId BIGINT PRIMARY KEY,
                         TargetChannelId BIGINT NOT NULL,
                         Template VARCHAR(255) NOT NULL,
                         GuildId BIGINT NOT NULL
                     );
-
                     CREATE TABLE IF NOT EXISTS RoleGiveSettings (
                         MessageId BIGINT PRIMARY KEY,
                         EmojiName VARCHAR(255) NOT NULL,
                         RoleId BIGINT NOT NULL,
                         GuildId BIGINT NOT NULL
                     );";
-
                 await conn.ExecuteAsync(sql);
                 Console.WriteLine("[DB] Initialized successfully for PostgreSQL.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DB Warning] Could not initialize tables: {ex.Message}");
-                // Railway のログで詳細を確認できるように inner exception も出力すると良いです
-                if (ex.InnerException != null) 
-                    Console.WriteLine($"Inner: {ex.InnerException.Message}");
+                Console.WriteLine($"[DB Error] {ex.Message}");
             }
         }
     }
