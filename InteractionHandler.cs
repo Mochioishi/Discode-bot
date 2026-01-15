@@ -33,8 +33,8 @@ namespace Discord_bot
             {
                 // --- 重複削除：以前のグローバル登録を一度クリアする ---
                 // 重複が完全に消えたら、将来的にこの行はコメントアウトしてもOKです
-                await _client.Rest.DeleteAllGlobalCommandsAsync();
-                Console.WriteLine("[Ready] Global commands cleared to fix duplication.");
+                // await _client.Rest.DeleteAllGlobalCommandsAsync();
+                // Console.WriteLine("[Ready] Global commands cleared to fix duplication.");
 
                 // ギルド（サーバー）限定で登録（即時反映）
                 await _interactionService.RegisterCommandsToGuildAsync(guildId);
