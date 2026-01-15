@@ -31,21 +31,15 @@ builder.Services.AddHostedService<TimeSignalWorker>();
 
 var host = builder.Build();
 
-// --- 3. データベースの初期化とグローバルコマンドの掃除 ---
+// --- 3. データベースの初期化 ---
 using (var scope = host.Services.CreateScope())
 {
     var initializer = scope.ServiceProvider.GetRequiredService<DbInitializer>();
-    var client = scope.ServiceProvider.GetRequiredService<DiscordSocketClient>();
 
     try 
     {
         await initializer.InitializeAsync();
         Console.WriteLine("[DB] Database initialization completed.");
-        
-        // 注意: ここで DeleteAllGlobalCommandsAsync を呼ぶと、
-        // 以前登録してしまった「重複の原因」であるグローバルコマンドを消去できます。
-        // 一度実行して重複が消えたら、この行は削除するかコメントアウトしてOKです。
-         await client.Rest.DeleteAllGlobalCommandsAsync();
     }
     catch (Exception ex)
     {
