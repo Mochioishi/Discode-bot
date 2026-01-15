@@ -45,7 +45,7 @@ using (var scope = host.Services.CreateScope())
         // 注意: ここで DeleteAllGlobalCommandsAsync を呼ぶと、
         // 以前登録してしまった「重複の原因」であるグローバルコマンドを消去できます。
         // 一度実行して重複が消えたら、この行は削除するかコメントアウトしてOKです。
-        // await client.Rest.DeleteAllGlobalCommandsAsync();
+         await client.Rest.DeleteAllGlobalCommandsAsync();
     }
     catch (Exception ex)
     {
