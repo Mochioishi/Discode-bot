@@ -12,9 +12,14 @@ var builder = Host.CreateApplicationBuilder(args);
 // --- 1. Discord Socket Client の設定 ---
 builder.Services.AddSingleton(new DiscordSocketConfig
 {
-    // メッセージ内容を読み取るために MessageContent を追加
-    GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.GuildMembers | GatewayIntents.MessageContent,
+    // 重要: GuildMessageReactions を追加しないとリアクションを検知できません
+    // MessageCacheSize を設定すると、古いメッセージへのリアクションも検知しやすくなります
+    GatewayIntents = GatewayIntents.AllUnprivileged 
+                     | GatewayIntents.GuildMembers 
+                     | GatewayIntents.MessageContent 
+                     | GatewayIntents.GuildMessageReactions,
     AlwaysDownloadUsers = true,
+    MessageCacheSize = 100,
     LogGatewayIntentWarnings = false
 });
 
@@ -24,6 +29,7 @@ builder.Services.AddSingleton<InteractionService>();
 builder.Services.AddSingleton<InteractionHandler>();
 
 builder.Services.AddSingleton<DbConfig>();
+// DbInitializer は static を外したクラスとして登録（DbInitializer.cs の修正も必要です）
 builder.Services.AddSingleton<DbInitializer>();
 
 builder.Services.AddHostedService<Worker>();
@@ -38,6 +44,7 @@ using (var scope = host.Services.CreateScope())
 
     try 
     {
+        // initializer.cs で定義した InitializeAsync を呼び出す
         await initializer.InitializeAsync();
         Console.WriteLine("[DB] Database initialization completed.");
     }
