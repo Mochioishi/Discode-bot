@@ -13,18 +13,25 @@ namespace Discord_bot.Module
     public class RoleModule : InteractionModuleBase<SocketInteractionContext>
     {
         private readonly DbConfig _db;
+        
         // セットアップ待機中のユーザーと、その時のInteractionContextを保持
-        // (UserID, (RoleID, Context))
-        private static readonly ConcurrentDictionary<ulong, (ulong RoleId, IInteractionContext Context)> _pendingSetups = new();
+        // コンテキストを保持することで、あとで「考え中」だったメッセージを書き換えられます
+        public static readonly ConcurrentDictionary<ulong, (ulong RoleId, IInteractionContext Context)> _pendingSetups = new();
 
         public RoleModule(DbConfig db) => _db = db;
 
         [SlashCommand("rolegive", "リアクションロール設定を開始します")]
         public async Task StartRoleGive([Summary("role", "付与・剥奪するロール")] IRole role)
         {
-            // 後でメッセージを書き換えるためにContextを保存
+            // ユーザーIDをキーにして、設定したいロールIDと現在のコンテキストを一時保存
             _pendingSetups[Context.User.Id] = (role.Id, Context);
-            await RespondAsync("⚙️ **セットアップ開始**\n既存のメッセージにリアクションしてください。その絵文字が登録されます。", ephemeral: true);
+
+            await RespondAsync(
+                $"⚙️ **セットアップ開始**\n" +
+                $"1. ロールを紐付けたい**既存のメッセージ**にリアクションしてください。\n" +
+                $"2. そのリアクションした絵文字がそのまま登録されます。\n" +
+                $"※Botが同じリアクションを付けたら完了です。", 
+                ephemeral: true);
         }
 
         [SlashCommand("rolegive_list", "設定済みのリアクションロール一覧を表示")]
@@ -32,34 +39,41 @@ namespace Discord_bot.Module
         {
             await DeferAsync(ephemeral: true);
             using var conn = _db.GetConnection();
-            // Guild内の全設定を取得
+            
+            // ギルド内の全設定を取得
             var settings = (await conn.QueryAsync("SELECT * FROM RoleGiveSettings WHERE GuildId = @gid", new { gid = (long)Context.Guild.Id })).ToList();
 
             if (!settings.Any())
             {
-                await FollowupAsync("設定されているリアクションロールはありません。", ephemeral: true);
+                await FollowupAsync("現在設定されているリアクションロールはありません。", ephemeral: true);
                 return;
             }
 
-            var embed = new EmbedBuilder().WithTitle("🎭 リアクションロール設定一覧").WithColor(Color.Blue);
+            var embed = new EmbedBuilder()
+                .WithTitle("🎭 リアクションロール一覧")
+                .WithColor(Color.Blue);
+
             var builder = new ComponentBuilder();
 
             foreach (var s in settings)
             {
+                // PostgreSQLのカラム名小文字対策
                 var mid = (ulong)(long)s.messageid;
                 var rid = (ulong)(long)s.roleid;
+                var cid = (ulong)(long)(s.channelid ?? 0);
                 var emo = (string)s.emojiname;
 
-                // チャンネル名とロール名を取得
-                var role = Context.Guild.GetRole(rid);
-                var msg = await Context.Channel.GetMessageAsync(mid); // 簡易的に現在のchから探すが、見つからない場合はIDを表示
-                var channel = Context.Guild.Channels.FirstOrDefault(c => c.Id == (ulong)(long)s.channelid); // DBにChannelIdがある場合
-                
-                // ※もしDBにChannelIdを保存していない場合は、メッセージオブジェクトから逆引き
-                string channelName = "不明なch";
-                if (msg != null) channelName = msg.Channel.Name;
+                // チャンネル名を取得
+                var channel = Context.Guild.GetChannel(cid);
+                string channelName = channel?.Name ?? "不明なch";
 
-                embed.AddField($"#{channelName}", $"{emo} → <@&{rid}>");
+                // ロール名を取得（メンション形式）
+                var role = Context.Guild.GetRole(rid);
+                string roleMention = role?.Mention ?? "不明なロール";
+
+                embed.AddField($"#{channelName}", $"{emo} → {roleMention}");
+                
+                // 削除ボタン（ラベルにはチャンネル名を入れる）
                 builder.WithButton($"設定削除: #{channelName}", $"rg_del_{mid}", ButtonStyle.Danger);
             }
 
@@ -75,23 +89,26 @@ namespace Discord_bot.Module
             await FollowupAsync($"✅ 指定したメッセージのリアクションロール設定を解除しました。", ephemeral: true);
         }
 
+        // --- イベントハンドラ ---
         public static async Task HandleReactionAsync(Cacheable<IUserMessage, ulong> cache, Cacheable<IMessageChannel, ulong> channel, SocketReaction reaction, bool isAdded, DbConfig db)
         {
             if (reaction.User.Value.IsBot) return;
 
-            // 1. 新規登録モード
+            // 1. 新規登録モードの処理
             if (isAdded && _pendingSetups.TryRemove(reaction.UserId, out var setup))
             {
                 using var conn = db.GetConnection();
                 const string sql = @"
                     INSERT INTO RoleGiveSettings (MessageId, EmojiName, RoleId, GuildId, ChannelId) 
                     VALUES (@mid, @emo, @rid, @gid, @chid) 
-                    ON CONFLICT (MessageId) DO UPDATE SET RoleId = @rid, EmojiName = @emo";
+                    ON CONFLICT (MessageId) 
+                    DO UPDATE SET RoleId = @rid, EmojiName = @emo, ChannelId = @chid";
 
                 var socketChannel = reaction.Channel as SocketGuildChannel;
                 var gid = socketChannel?.Guild.Id;
 
-                await conn.ExecuteAsync(sql, new {
+                await conn.ExecuteAsync(sql, new
+                {
                     mid = (long)reaction.MessageId,
                     emo = reaction.Emote.ToString(),
                     rid = (long)setup.RoleId,
@@ -99,21 +116,53 @@ namespace Discord_bot.Module
                     chid = (long)reaction.Channel.Id
                 });
 
-                // Botがリアクションを付けて完了通知
+                // Bot自身がリアクションを付けて完了の合図
                 var msg = await reaction.Channel.GetMessageAsync(reaction.MessageId) as IUserMessage;
                 if (msg != null) await msg.AddReactionAsync(reaction.Emote);
 
-                // --- 元のSlashコマンドの応答を書き換え ---
+                // 元のSlashコマンドの応答を書き換えて完了を通知
                 var role = socketChannel?.Guild.GetRole(setup.RoleId);
                 string roleName = role?.Mention ?? "不明なロール";
-                await setup.Context.Interaction.ModifyOriginalResponseAsync(prop => 
-                    prop.Content = $"✅ 設定しました： {reaction.Emote} → {roleName}");
                 
+                try 
+                {
+                    await setup.Context.Interaction.ModifyOriginalResponseAsync(prop => 
+                        prop.Content = $"✅ 設定しました： {reaction.Emote} → {roleName}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[RoleGive Setup Error] Could not modify response: {ex.Message}");
+                }
                 return;
             }
 
-            // 2. ロール付与・剥奪（中略：以前のコードと同じ）
-            // ... (ここに以前の付与/剥奪ロジックを記述)
+            // 2. 通常のロール付与・剥奪
+            using (var conn = db.GetConnection())
+            {
+                // roleid を小文字で取得
+                const string sql = "SELECT roleid FROM RoleGiveSettings WHERE MessageId = @mid AND EmojiName = @emo";
+                var result = await conn.QueryFirstOrDefaultAsync(sql, new { mid = (long)reaction.MessageId, emo = reaction.Emote.ToString() });
+
+                if (result != null)
+                {
+                    ulong dbRoleId = (ulong)(long)result.roleid;
+                    var guildUser = (reaction.Channel as SocketGuildChannel)?.Guild.GetUser(reaction.UserId);
+                    if (guildUser == null) return;
+
+                    var role = guildUser.Guild.GetRole(dbRoleId);
+                    if (role == null) return;
+
+                    try
+                    {
+                        if (isAdded) await guildUser.AddRoleAsync(role);
+                        else await guildUser.RemoveRoleAsync(role);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[RoleGive Error] Role assignment failed: {ex.Message}");
+                    }
+                }
+            }
         }
     }
 }
