@@ -23,15 +23,13 @@ namespace Discord_bot.Module
         public async Task SetPrsk(
             [Summary("monitor", "数字を監視するテキストチャンネル")] ITextChannel monitor,
             [Summary("target", "名前を変更する対象のチャンネル")] IGuildChannel target,
-            [Summary("template", "形式 (例: 【roomid】協力ライブ)")] string template)
+            [Summary("template", "形式 (例: 🎵 と入れるだけで 🎵【12345】になります)")] string template)
         {
-            // 応答なしエラーを回避
             await DeferAsync(ephemeral: true);
 
             try
             {
                 using var conn = _db.GetConnection();
-                // MySQLの ON DUPLICATE KEY ではなく PostgreSQLの ON CONFLICT を使用
                 const string sql = @"
                     INSERT INTO PrskSettings (MonitorChannelId, TargetChannelId, Template, GuildId) 
                     VALUES (@mc, @tc, @tp, @gid) 
@@ -50,7 +48,7 @@ namespace Discord_bot.Module
             catch (Exception ex)
             {
                 Console.WriteLine($"[Prsk Error] {ex.Message}");
-                await FollowupAsync("❌ 保存中にエラーが発生しました。DB設定を確認してください。", ephemeral: true);
+                await FollowupAsync("❌ 保存中にエラーが発生しました。", ephemeral: true);
             }
         }
 
@@ -58,7 +56,6 @@ namespace Discord_bot.Module
         public async Task ListPrsk()
         {
             await DeferAsync(ephemeral: true);
-
             using var conn = _db.GetConnection();
             const string sql = "SELECT * FROM PrskSettings WHERE GuildId = @gid";
             var settings = (await conn.QueryAsync(sql, new { gid = (long)Context.Guild.Id })).ToList();
@@ -74,10 +71,8 @@ namespace Discord_bot.Module
 
             foreach (var s in settings)
             {
-                // PostgreSQLのBIGINTをulongに変換してチャンネル取得
                 var mChId = (ulong)(long)s.monitorchannelid; 
                 var tChId = (ulong)(long)s.targetchannelid;
-
                 var mCh = await _client.GetChannelAsync(mChId) as ITextChannel;
                 var tCh = await _client.GetChannelAsync(tChId) as IGuildChannel;
                 
@@ -97,7 +92,6 @@ namespace Discord_bot.Module
             await FollowupAsync("✅ 監視設定を削除しました。", ephemeral: true);
         }
 
-        // メッセージ受信ロジック
         public static async Task HandleMessageAsync(SocketMessage msg, DbConfig db, DiscordSocketClient client)
         {
             if (msg.Author.IsBot) return;
@@ -119,7 +113,21 @@ namespace Discord_bot.Module
                     if (targetCh != null)
                     {
                         string template = setting.template;
-                        string newName = template.Replace("【roomid】", match.Groups[1].Value);
+                        string roomId = match.Groups[1].Value;
+                        string newName;
+
+                        // --- デフォルトでroomidを適用するロジック ---
+                        if (template.Contains("roomid"))
+                        {
+                            // テンプレートに roomid が含まれていれば置換
+                            newName = template.Replace("roomid", roomId);
+                        }
+                        else
+                        {
+                            // 含まれていなければ、末尾に 【数字】 を自動付与
+                            newName = $"{template}【{roomId}】";
+                        }
+
                         await targetCh.ModifyAsync(x => x.Name = newName);
                     }
                     await msg.AddReactionAsync(new Emoji("🐾"));
