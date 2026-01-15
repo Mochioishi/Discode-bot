@@ -1,55 +1,61 @@
 using Dapper;
-using Npgsql;
-using System;
-using System.Threading.Tasks;
 
 namespace Discord_bot.Infrastructure
 {
-    public class DbInitializer
+    public static class DbInitializer
     {
-        private readonly DbConfig _db;
-        public DbInitializer(DbConfig db) => _db = db;
-
-        public async Task InitializeAsync()
+        public static void Initialize(DbConfig db)
         {
-            try 
-            {
-                using var conn = _db.GetConnection();
-                const string sql = @"
-                    CREATE TABLE IF NOT EXISTS BotTextSchedules (
-                        Id SERIAL PRIMARY KEY,
-                        Text TEXT NOT NULL,
-                        Title VARCHAR(255),
-                        ScheduledTime VARCHAR(10) NOT NULL,
-                        IsEmbed BOOLEAN DEFAULT TRUE,
-                        ChannelId BIGINT NOT NULL,
-                        GuildId BIGINT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS DeleteConfigs (
-                        ChannelId BIGINT PRIMARY KEY,
-                        GuildId BIGINT NOT NULL,
-                        Days INT NOT NULL,
-                        ProtectType INT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS PrskSettings (
-                        MonitorChannelId BIGINT PRIMARY KEY,
-                        TargetChannelId BIGINT NOT NULL,
-                        Template VARCHAR(255) NOT NULL,
-                        GuildId BIGINT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS RoleGiveSettings (
-                        MessageId BIGINT PRIMARY KEY,
-                        EmojiName VARCHAR(255) NOT NULL,
-                        RoleId BIGINT NOT NULL,
-                        GuildId BIGINT NOT NULL
-                    );";
-                await conn.ExecuteAsync(sql);
-                Console.WriteLine("[DB] Initialized successfully for PostgreSQL.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[DB Error] {ex.Message}");
-            }
+            using var conn = db.GetConnection();
+
+            // --- RoleGiveSettings テーブルの作成とカラム追加 ---
+            conn.Execute(@"
+                CREATE TABLE IF NOT EXISTS RoleGiveSettings (
+                    MessageId BIGINT PRIMARY KEY,
+                    EmojiName TEXT NOT NULL,
+                    RoleId BIGINT NOT NULL,
+                    GuildId BIGINT NOT NULL
+                )");
+
+            // ChannelId カラムが存在しない場合のみ追加する（PostgreSQL用）
+            conn.Execute(@"
+                DO $$ 
+                BEGIN 
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                   WHERE table_name='rolegivesettings' AND column_name='channelid') THEN 
+                        ALTER TABLE RoleGiveSettings ADD COLUMN ChannelId BIGINT; 
+                    END IF; 
+                END $$;");
+
+            // --- PrskSettings (プロセカ) ---
+            conn.Execute(@"
+                CREATE TABLE IF NOT EXISTS PrskSettings (
+                    MonitorChannelId BIGINT PRIMARY KEY,
+                    TargetChannelId BIGINT NOT NULL,
+                    Template TEXT NOT NULL,
+                    GuildId BIGINT NOT NULL
+                )");
+
+            // --- BotTextSchedules (予約投稿) ---
+            conn.Execute(@"
+                CREATE TABLE IF NOT EXISTS BotTextSchedules (
+                    Id SERIAL PRIMARY KEY,
+                    Text TEXT NOT NULL,
+                    Title TEXT,
+                    ScheduledTime TEXT NOT NULL,
+                    IsEmbed BOOLEAN NOT NULL,
+                    ChannelId BIGINT NOT NULL,
+                    GuildId BIGINT NOT NULL
+                )");
+
+            // --- DeleteConfigs (自動削除) ---
+            conn.Execute(@"
+                CREATE TABLE IF NOT EXISTS DeleteConfigs (
+                    ChannelId BIGINT PRIMARY KEY,
+                    GuildId BIGINT NOT NULL,
+                    Days INT NOT NULL,
+                    ProtectType INT NOT NULL DEFAULT 0
+                )");
         }
     }
 }
