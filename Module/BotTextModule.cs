@@ -13,9 +13,9 @@ namespace Discord_bot.Module
         [SlashCommand("bottext", "Botに発言させます（時刻指定で予約可能）")]
         public async Task SetBotText(
             [Summary("text", "送信する本文")] string text,
-            [Summary("time", "送信時刻 (HH:mm) 未記入で即時送信")] string time = "",
+            [Summary("is_embed", "埋め込みメッセージにするか")] bool isEmbed = false),
             [Summary("title", "埋め込み時のタイトル")] string title = "",
-            [Summary("is_embed", "埋め込みメッセージにするか")] bool isEmbed = false)
+            [Summary("time", "送信時刻 (HH:mm) 未記入で即時送信")] string time = ""
         {
             // 1. まず「考え中...」の状態にする（タイムアウト防止）
             await DeferAsync(ephemeral: true);
